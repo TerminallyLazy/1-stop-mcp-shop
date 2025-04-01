@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatMessage } from "@/lib/types";
 import { ToolResultDisplay } from "./tool-result-display";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Button } from "../ui/button";
 
 interface ChatContainerProps {
   messages: ChatMessage[];
@@ -51,7 +53,7 @@ export function ChatContainer({ messages, isLoading }: ChatContainerProps) {
                 message.role === 'user' 
                   ? 'bg-primary text-primary-foreground' 
                   : message.role === 'tool'
-                    ? 'bg-yellow-500/20 text-foreground border border-yellow-500/50'
+                    ? 'bg-blue-500/20 text-foreground border border-blue-500/50'
                     : message.role === 'system'
                       ? 'bg-green-500/20 text-foreground border border-green-500/50'
                       : 'bg-muted text-foreground'
@@ -59,16 +61,30 @@ export function ChatContainer({ messages, isLoading }: ChatContainerProps) {
             >
               {message.role === 'tool' ? (
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Tool Result</div>
-                  <div className="font-mono text-sm">
-                    {typeof message.content === 'string' ? message.content.substring(0, 50) + '...' : 'Tool result received'}
+                  <div className="text-xs flex items-center text-muted-foreground mb-1 w-full">Tool Result:</div>                  <div className="font-mono text-sm">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="w-full bg-yellow-500/20 text-yellow-700 dark:text-yellow-300">
+                          View Tool Result
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-[700px] rounded-lg">
+                        <pre className="p-2 overflow-auto max-h-[400px] font-mono bg-muted/30">
+                          <code>
+                            {typeof message.content === 'string' ? message.content : 'Tool result received'}
+                          </code>
+                        </pre>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               ) : message.toolCalls ? (
                 <div className="w-full">
-                  <div className="whitespace-pre-wrap">{message.content}</div>
-                  <div className="mt-2 border-t pt-2">
-                    <div className="text-xs text-muted-foreground mb-1">Tool Call:</div>
+                  {/* Always show the initial LLM response text */}
+                  {/* <div className="whitespace-pre-wrap">{message.content}</div> */}
+                  
+                  {/* Collapsible tool calls section */}
+                  <div className="mt-2">
                     <div className="space-y-1">
                       {message.toolCalls.map(toolCall => (
                         <ToolResultDisplay key={toolCall.id} toolCall={toolCall} />

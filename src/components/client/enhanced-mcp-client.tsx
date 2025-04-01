@@ -12,6 +12,7 @@ import { callMCPTool } from "@/lib/api/mcp";
 import { ChatMessage, MCPServer, ToolCall } from "@/lib/types";
 import { listMCPServers } from "@/lib/api/mcp";
 import { getUserSession } from "@/lib/supabase";
+import { createFollowUpPrompt } from "@/lib/utils/tool-handler";
 
 export function EnhancedMCPClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -144,8 +145,46 @@ export function EnhancedMCPClient() {
     
     // If no structured MCP calls found, fall back to regex pattern matching
     if (toolCalls.length === 0) {
-      // Check for tool call indicators in the message content
-      // Regular expression to find tool call patterns like: "Using tool: tool_name(params)"
+      // Check for common Gemini output patterns like: "tool_name(params)" or "tool_code tool_name(params)"
+      // This regex is more flexible to handle Gemini's formatting of tool calls
+      const geminiToolPattern = /(?:```(?:tool_code\s+)?|\btool_code\s+)?([a-zA-Z0-9_]+)\s*\(\s*(?:location|query|expression)=(?:"|')([^"']+)(?:"|')\s*\)/gi;
+      let geminiMatch;
+      
+      while ((geminiMatch = geminiToolPattern.exec(content)) !== null) {
+        const toolName = geminiMatch[1].trim();
+        const paramValue = geminiMatch[2].trim();
+        
+        // Extract parameter name based on common tools
+        let paramName = "query"; // Default
+        if (toolName.includes("weather")) {
+          paramName = "location";
+        } else if (toolName.includes("calculate")) {
+          paramName = "expression";
+        }
+        
+        // Find the server that has this tool
+        const serverWithTool = servers.find(server => 
+          server.tools.some(tool => tool.name === toolName || 
+                                   tool.name === `get_${toolName}`)
+        );
+        
+        if (serverWithTool) {
+          // Find the exact tool
+          const exactToolName = serverWithTool.tools.find(t => 
+            t.name === toolName || t.name === `get_${toolName}`
+          )?.name || toolName;
+          
+          // Add the tool call
+          toolCalls.push({
+            id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            tool: exactToolName,
+            args: { [paramName]: paramValue },
+            status: 'pending'
+          });
+        }
+      }
+      
+      // Check for tool call indicators in the message content with Using tool: format
       const toolCallPattern = /Using tool:?\s+([a-zA-Z0-9_]+)\(([^)]*)\)/gi;
       let match;
       
@@ -407,15 +446,33 @@ You can use these tools to retrieve information or take actions for the user. On
         const userInstruction: ChatMessage = {
           id: `gemini-context-${Date.now()}`,
           role: 'user',
-          content: `You are a helpful assistant that can have natural conversations with users. You can also use tools when appropriate, but you don't need to use tools for every response.
+          content: `You are a helpful assistant that can have natural conversations with users. You can use tools when appropriate to get information needed to answer questions.
 
 Available tools: ${installedServers.map(server => 
             server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
           ).join('. ')}
 
-IMPORTANT: After using a tool once, just respond to the information without making additional tool calls. Wait for the user to ask another question before using tools again.
+When you need to use a tool, format it like this:
+<mcp:tool_call>
+{
+  "jsonrpc": "2.0",
+  "id": "unique-id",
+  "method": "execute_tool",
+  "params": {
+    "name": "tool_name",
+    "parameters": {
+      "param1": "value1"
+    }
+  }
+}
+</mcp:tool_call>
 
-If I ask about weather, you can use the weather tool. Otherwise, just have a normal conversation.
+IMPORTANT: If you can't format exactly like above, you can use: get_weather(location="city_name") 
+
+For example: To check the weather in Seattle, you could use:
+get_weather(location="Seattle")
+
+IMPORTANT: After using a tool once, just respond to the information without making additional tool calls. Wait for the user to ask another question before using tools again.
 
 User message: ${userMessage.content}`,
           createdAt: new Date().toISOString()
@@ -423,6 +480,34 @@ User message: ${userMessage.content}`,
         
         // Only pass the current message for Gemini to keep things simple
         response = await callGeminiAPI([userInstruction], selectedModel);
+      } else if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
+        // For Anthropic models through OpenRouter, we need special handling
+        // They only support 'user' and 'assistant' roles
+        
+        // Create a simplified user message that includes tool information
+        const anthropicUserMessage: ChatMessage = {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: `You are a helpful assistant with access to tools. Available tools: ${installedServers.map(server => 
+            server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
+          ).join('. ')}
+
+You can use these tools when needed to help answer questions. Use a format like:
+"I'll check that using the get_weather tool"
+
+My question is: ${userMessage.content}`,
+          createdAt: new Date().toISOString()
+        };
+        
+        // Get the most recent conversational context (up to 5 messages)
+        // Only include user and assistant messages
+        const recentContext = messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .slice(-5)
+          .map(m => ({...m})); // Create copies to avoid mutation
+        
+        // Add the new user message
+        response = await callOpenRouterAPI([...recentContext, anthropicUserMessage], selectedModel);
       } else {
         response = await callOpenRouterAPI([...messages, systemMessage, userMessage], selectedModel);
       }
@@ -434,15 +519,29 @@ User message: ${userMessage.content}`,
         const toolCalls = detectToolCalls(assistantMessage.content, installedServers);
         
         if (toolCalls.length > 0) {
-          // Add tool calls to the assistant message
+          // Extract and remove tool call XML from message content
+          let cleanedContent = assistantMessage.content;
+          const jsonRpcPattern = /(?:<mcp:tool_call>|```xml\s*<mcp:tool_call>)\s*([\s\S]*?)\s*(?:<\/mcp:tool_call>|<\/mcp:tool_call>\s*```)/gi;
+          
+          // Find all tool call blocks and remove them from content
+          let match;
+          while ((match = jsonRpcPattern.exec(assistantMessage.content)) !== null) {
+            cleanedContent = cleanedContent.replace(match[0], '');
+          }
+          
+          // Clean up any leftover whitespace or newlines
+          cleanedContent = cleanedContent.trim();
+          
+          // Prepare the assistant message with clean content and tool calls
           assistantMessage = {
             ...assistantMessage,
+            content: cleanedContent,
             toolCalls
           };
           
           setActiveToolCalls(toolCalls);
           
-          // Add the assistant message with tool calls
+          // Add the assistant message with clean content and tool calls
           setMessages(prev => [...prev, assistantMessage]);
           
           // Process only the first tool call to prevent chaining multiple calls
@@ -616,7 +715,7 @@ User message: ${userMessage.content}`,
   };
 
   const generateFollowUpResponse = async (toolCall: ToolCall, result: any) => {
-    console.log(`Generating follow-up response for tool call ${toolCall.id}`);
+    console.log(`Generating follow-up response for tool call ${toolCall.id} using model ${selectedModel}`);
     
     // Use the current conversation plus the tool result to generate a follow-up
     const currentMessages = [...messages];
@@ -626,40 +725,36 @@ User message: ${userMessage.content}`,
       ? result 
       : JSON.stringify(result, null, 2);
     
-    // Create a formatted tool result message for the LLM
-    const toolResultMessage: ChatMessage = {
-      id: `tool-${Date.now()}`,
-      role: 'tool',
-      content: formattedResult,
-      toolCallId: toolCall.id,
-      createdAt: new Date().toISOString()
-    };
+    // Create a tool result message with special handling for different model types
+    let toolResultMessage: ChatMessage;
+    
+    // Special handling for Anthropic models
+    if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
+      // For Anthropic models, we need to use user/assistant roles only
+      toolResultMessage = {
+        id: `user-tool-result-${Date.now()}`,
+        role: 'user', // Use user role instead of tool for Anthropic
+        content: `Here's the result from the ${toolCall.tool} tool call:\n\n${formattedResult}\n\nPlease analyze this and respond.`,
+        createdAt: new Date().toISOString()
+      };
+    } else {
+      // Standard tool result message for non-Anthropic models
+      toolResultMessage = {
+        id: `tool-${Date.now()}`,
+        role: 'tool',
+        content: formattedResult,
+        toolCallId: toolCall.id,
+        createdAt: new Date().toISOString()
+      };
+    }
     
     // Create a full message history including the tool result
     const historyWithToolResult = [...currentMessages, toolResultMessage];
     
     try {
-      // Add a more directive system prompt to ensure the LLM responds in natural language without making additional tool calls
-          // Create a follow-up message that will vary based on the model
-      let followUpPrompt: ChatMessage;
-      
-      if (selectedModel.startsWith('gemini')) {
-        // For Gemini, we need to create a user message with the tool results
-        followUpPrompt = {
-          id: `followup-${Date.now()}`,
-          role: 'user',
-          content: `Here are the results from the ${toolCall.tool} tool: ${JSON.stringify(result, null, 2)}\n\nPlease respond to this information in a natural, conversational way. Include specific details from the results but present them in a friendly, human-like manner. Do not just repeat the raw data or use phrases like "the tool returned" or "according to the data."`,
-          createdAt: new Date().toISOString()
-        };
-      } else {
-        // For other models like OpenAI, we can use a system message
-        followUpPrompt = {
-          id: `system-${Date.now()}`,
-          role: 'system',
-          content: `A tool call to "${toolCall.tool}" has just completed with the following result: ${JSON.stringify(result, null, 2)}\n\nRespond conversationally to this information. Include specific details from the result (like temperatures, values, etc). Your response should be in natural language without structured formats. Don't say things like "the tool returned" or "according to the data" - just present the information naturally as if you're having a conversation.`,
-          createdAt: new Date().toISOString()
-        };
-      };
+      // Create a follow-up prompt based on the model type
+      // This will get special handling for Gemini Flash vs other models
+      const followUpPrompt = createFollowUpPrompt(toolCall, result, selectedModel);
       
       console.log('Calling LLM API to generate follow-up response');
       
@@ -670,6 +765,23 @@ User message: ${userMessage.content}`,
         // For Gemini, we just use the followUpPrompt as a single message
         // This simplifies the conversation flow for Gemini's requirements
         followUpMessages = [followUpPrompt];
+      } else if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
+        // For Anthropic models, we need a complete reset of the conversation
+        // Just use a single message with the tool result and analysis request
+        followUpMessages = [
+          // Just a single user message with the tool result and request for analysis
+          {
+            id: `user-follow-up-${Date.now()}`,
+            role: 'user',
+            content: `I used the ${toolCall.tool} tool and got this result:\n\n${formattedResult}\n\n` +
+                     `Please analyze this information and provide a helpful, conversational response. ` +
+                     `Include relevant details from the result in your explanation.\n\n` +
+                     `IMPORTANT: Do NOT use any tool call syntax in your response. Do NOT use XML tags or ` +
+                     `code blocks. Do NOT include any functions like get_weather() or function calls in your response. ` +
+                     `Just respond in plain natural language.`,
+            createdAt: new Date().toISOString()
+          }
+        ];
       } else {
         // For other models, we include the tool result and context
         followUpMessages = [...historyWithToolResult, followUpPrompt];
@@ -679,6 +791,15 @@ User message: ${userMessage.content}`,
       let response;
       if (selectedModel.startsWith('gemini')) {
         response = await callGeminiAPI(followUpMessages, selectedModel);
+      } else if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
+        // For Anthropic models, ensure we're using a simple conversation with only user/assistant roles
+        const simplifiedMessages = followUpMessages.map(msg => ({
+          ...msg,
+          role: msg.role === 'system' ? 'user' : msg.role
+        })).filter(msg => msg.role === 'user' || msg.role === 'assistant');
+        
+        console.log('Sending simplified messages to Anthropic:', simplifiedMessages);
+        response = await callOpenRouterAPI(simplifiedMessages, selectedModel);
       } else {
         response = await callOpenRouterAPI(followUpMessages, selectedModel);
       }
@@ -686,15 +807,80 @@ User message: ${userMessage.content}`,
       console.log('LLM follow-up response received:', response);
       
       if (response.success && response.message) {
-        const followUpMessage = response.message as ChatMessage;
+        let followUpMessage = response.message as ChatMessage;
         
-        // Check if the follow-up message contains tool calls
+        // For Anthropic/Claude models, do extra cleaning to ensure we get natural language
+        if (selectedModel.includes('anthropic') || selectedModel.includes('claude')) {
+          // Clean any remaining tool call syntax from the content
+          let cleanedContent = followUpMessage.content;
+          
+          // Remove any XML tags
+          cleanedContent = cleanedContent.replace(/<[^>]*>/g, '');
+          
+          // Remove code blocks
+          cleanedContent = cleanedContent.replace(/```[\s\S]*?```/g, '');
+          
+          // Remove function-style calls
+          cleanedContent = cleanedContent.replace(/\b(get_weather|calculate|search)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*["'][^"']*["']\s*\)/g, '');
+          
+          // Remove tool call indicator phrases
+          cleanedContent = cleanedContent.replace(/\b(Using tool:|Tool call:|I'll use the|Let me use)\s+[a-zA-Z0-9_]+\s+tool\b.*$/gm, '');
+          
+          // Clean up extra whitespace
+          cleanedContent = cleanedContent.replace(/\n{3,}/g, '\n\n').trim();
+          
+          // Update the message with cleaned content
+          followUpMessage = {
+            ...followUpMessage,
+            content: cleanedContent || "Here's the information you requested."
+          };
+        }
+        
+        // For Gemini Flash especially, aggressively remove any tool call patterns
+        // to prevent chaining of multiple tool calls
+        let cleanedContent = followUpMessage.content;
+        
+        if (selectedModel.includes('flash')) {
+          // Remove any XML-style tool calls
+          const xmlPattern = /<[^>]*>/g;
+          cleanedContent = cleanedContent.replace(xmlPattern, '');
+          
+          // Remove code blocks that might contain tool calls
+          const codeBlockPattern = /```[\s\S]*?```/g;
+          cleanedContent = cleanedContent.replace(codeBlockPattern, '');
+          
+          // Remove any function-style calls like tool_name(param="value")
+          const funcPattern = /\w+\s*\([^)]*\)/g;
+          cleanedContent = cleanedContent.replace(funcPattern, '');
+          
+          // Clean up any leftover whitespace or multiple newlines
+          cleanedContent = cleanedContent.replace(/\n{3,}/g, '\n\n').trim();
+          
+          // Update the message with cleaned content
+          followUpMessage.content = cleanedContent;
+        }
+        
+        // Check if the follow-up message contains tool calls (for non-flash models)
         const toolCalls = detectToolCalls(followUpMessage.content, installedServers);
         
-        if (toolCalls.length > 0) {
-          // Add tool calls to the follow-up message
+        if (toolCalls.length > 0 && !selectedModel.includes('flash')) {
+          // Extract and remove tool call XML from message content
+          let cleanedContent = followUpMessage.content;
+          const jsonRpcPattern = /(?:<mcp:tool_call>|```xml\s*<mcp:tool_call>)\s*([\s\S]*?)\s*(?:<\/mcp:tool_call>|<\/mcp:tool_call>\s*```)/gi;
+          
+          // Find all tool call blocks and remove them from content
+          let match;
+          while ((match = jsonRpcPattern.exec(followUpMessage.content)) !== null) {
+            cleanedContent = cleanedContent.replace(match[0], '');
+          }
+          
+          // Clean up any leftover whitespace or newlines
+          cleanedContent = cleanedContent.trim();
+          
+          // Add tool calls to the follow-up message with clean content
           const enhancedFollowUpMessage = {
             ...followUpMessage,
+            content: cleanedContent,
             toolCalls
           };
           
@@ -885,7 +1071,7 @@ User message: ${userMessage.content}`,
                 </TabsContent>
                 <TabsContent value="openrouter" className="space-y-2 mt-2">
                   <Button 
-                    variant={selectedModel === "openai/gpt-4" ? "default" : "outline"} 
+                    variant={selectedModel === "openai/gpt-4o" ? "default" : "outline"} 
                     className="w-full justify-start"
                     onClick={() => setSelectedModel("openai/gpt-4o")}
                   >
@@ -895,12 +1081,12 @@ User message: ${userMessage.content}`,
                     </div>
                   </Button>
                   <Button 
-                    variant={selectedModel === "anthropic/claude-3-7-sonnet-20250219" ? "default" : "outline"}
+                    variant={selectedModel === "anthropic/claude-3-sonnet@20240229" ? "default" : "outline"}
                     className="w-full justify-start"
-                    onClick={() => setSelectedModel("anthropic/claude-3-7-sonnet-20250219")}
+                    onClick={() => setSelectedModel("anthropic/claude-3-sonnet@20240229")}
                   >
                     <div className="text-left">
-                      <div className="font-medium">Claude 3 Opus</div>
+                      <div className="font-medium">Claude 3 Sonnet</div>
                       <div className="text-xs text-muted-foreground">Via OpenRouter</div>
                     </div>
                   </Button>
@@ -959,7 +1145,7 @@ User message: ${userMessage.content}`,
                           message.role === 'user' 
                             ? 'bg-primary text-primary-foreground' 
                             : message.role === 'tool'
-                              ? 'bg-yellow-500/20 text-foreground border border-yellow-500/50'
+                              ? 'bg-purple-500/20 text-foreground border border-purple-500/50'
                               : message.role === 'system'
                                 ? 'bg-green-500/20 text-foreground border border-green-500/50'
                                 : 'bg-muted text-foreground'
@@ -967,35 +1153,126 @@ User message: ${userMessage.content}`,
                       >
                         {message.role === 'tool' ? (
                           <div>
-                            <div className="text-xs text-muted-foreground mb-1">Tool Result:</div>
-                            <div className="font-mono text-sm overflow-x-auto hidden">
-                              {message.content}
-                            </div>
+                            <details className="cursor-pointer">
+                              <summary className="flex items-center">
+                                <span className="text-xs text-muted-foreground">Tool Result</span>
+                                <span className="ml-1 text-xs">▼</span>
+                              </summary>
+                              <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                <pre className="text-xs bg-muted rounded p-2 overflow-x-auto font-mono">
+                                  {message.content}
+                                </pre>
+                              </div>
+                            </details>
                           </div>
-                        ) : message.toolCalls ? (
+                        ) : message.role === 'assistant' ? (
                           <div>
-                            <div>{message.content}</div>
-                            <div className="mt-2 border-t pt-2">
-                              <div className="text-xs text-muted-foreground mb-1">Tool Call:</div>
-                              <div className="space-y-1">
+                            {/* Check if this is a response to a tool that should be cleaned */}
+                            {(() => {
+                              // Expanded detection of tool call syntax
+                              const containsToolSyntax = 
+                                message.content.includes('<mcp:tool_call>') ||
+                                message.content.includes('get_weather(') ||
+                                message.content.includes('calculate(') ||
+                                message.content.includes('search(') ||
+                                message.content.includes('Tool Result:') ||
+                                message.content.includes('```xml') ||
+                                message.content.includes('I\'ll use the') ||
+                                message.content.includes('Let me use') ||
+                                message.content.includes('I will check') ||
+                                message.content.includes('Let me check') ||
+                                (message.content.match(/```/) && message.content.match(/tool/i)) ||
+                                message.content.match(/Using the\s+\w+\s+tool/i);
+                              
+                              // Models like Claude sometimes still output tool instructions
+                              const isAnthropicResponse = selectedModel && 
+                                (selectedModel.includes('anthropic') || selectedModel.includes('claude'));
+                                
+                              // Clean up more aggressively for Anthropic models
+                              if (containsToolSyntax || isAnthropicResponse) {
+                                let cleanContent = message.content;
+                                // Remove all XML blocks
+                                cleanContent = cleanContent.replace(/<[^>]*>.*?<\/[^>]*>/g, '');
+                                cleanContent = cleanContent.replace(/<[^>]*>/g, '');
+                                
+                                // Remove code blocks
+                                cleanContent = cleanContent.replace(/```[\s\S]*?```/g, '');
+                                
+                                // Remove function-style calls more aggressively
+                                cleanContent = cleanContent.replace(/\b(\w+)\s*\(\s*[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*["'][^"']*["']\s*\)/g, '');
+                                
+                                // Remove tool call indicator phrases - more comprehensive pattern
+                                const toolPhrases = [
+                                  "I'll use the", "Let me use", "Using the tool", "Using tool:", 
+                                  "Tool call:", "I will use", "Let me check", "I can use", 
+                                  "To get this information", "To check", "To find", "To calculate"
+                                ];
+                                
+                                toolPhrases.forEach(phrase => {
+                                  const regex = new RegExp(`${phrase}[^.]*\\.`, 'gi');
+                                  cleanContent = cleanContent.replace(regex, '');
+                                });
+                                
+                                // Clean up excess whitespace
+                                cleanContent = cleanContent.replace(/\n{3,}/g, '\n\n').trim();
+                                
+                                // If the content is now empty after cleaning, use a default message
+                                if (!cleanContent || cleanContent.length < 20) {
+                                  return <div>Here's the information you requested.</div>;
+                                }
+                                
+                                return <div>{cleanContent}</div>;
+                              }
+                              // Normal display for responses without tool call syntax
+                              return <div>{message.content}</div>;
+                            })()}
+                            
+                            {/* Display tool calls in collapsible sections */}
+                            {message.toolCalls && message.toolCalls.length > 0 && (
+                              <div className="mt-2">
                                 {message.toolCalls.map(toolCall => (
                                   <div key={toolCall.id} className="text-sm">
                                     <details className="cursor-pointer">
                                       <summary className="flex items-center">
-                                        <span className="font-mono font-semibold">{toolCall.tool}</span>
+                                        <span className="text-xs text-muted-foreground">Tool Call:</span>
+                                        <span className="ml-1 font-mono font-semibold text-xs">{toolCall.tool}</span>
+                                        <span className="ml-1 text-xs">▼</span>
                                       </summary>
-                                      <div className="pl-4 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                        <pre className="text-xs bg-muted rounded p-2 overflow-x-auto">
-                                          {JSON.stringify(toolCall.args, null, 2)}
-                                        </pre>
+                                      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                        {/* Display the tool call as XML */}
+                                        <div className="mb-2">
+                                          <pre className="text-xs bg-muted rounded p-2 overflow-x-auto font-mono">
+{`<mcp:tool_call>
+{
+  "jsonrpc": "2.0",
+  "id": "${toolCall.id}",
+  "method": "execute_tool",
+  "params": {
+    "name": "${toolCall.tool}",
+    "parameters": ${JSON.stringify(toolCall.args, null, 2)}
+  }
+}
+</mcp:tool_call>`}
+                                          </pre>
+                                        </div>
+                                        
+                                        {/* Display tool arguments */}
+                                        <div>
+                                          <div className="text-xs text-muted-foreground mb-1">Tool Arguments:</div>
+                                          <pre className="text-xs bg-muted rounded p-2 overflow-x-auto font-mono">
+                                            {JSON.stringify(toolCall.args, null, 2)}
+                                          </pre>
+                                        </div>
                                       </div>
                                     </details>
                                   </div>
                                 ))}
                               </div>
-                            </div>
-                          </div>
-                        ) : (
+                            )}
+                                
+
+                              </div>
+                          ) : (
                           message.content
                         )}
                       </div>

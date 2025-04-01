@@ -7,13 +7,24 @@ import { NextRequest, NextResponse } from 'next/server';
  */
 export async function POST(request: NextRequest) {
   try {
+    // Log the API request for debugging
+    console.log('[Gemini API Proxy] Received request at /api/gemini/');
+    console.log('[Gemini API Proxy] Request URL:', request.url);
+    console.log('[Gemini API Proxy] Request method:', request.method);
+    
     // Get the API key from environment variables
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     
+    // Check if API key exists
+    console.log('[Gemini API Proxy] API key exists:', !!apiKey);
+    
     if (!apiKey) {
-      console.error('Gemini API key is not configured');
+      console.error('[Gemini API Proxy] API key is not configured');
       return NextResponse.json(
-        { error: 'Gemini API key is not configured' },
+        { 
+          error: 'Gemini API key is not configured',
+          candidates: [] // Add empty candidates array for easier client handling
+        },
         { status: 500 }
       );
     }
@@ -26,7 +37,7 @@ export async function POST(request: NextRequest) {
     if (!model) {
       console.error('Missing model parameter');
       return NextResponse.json(
-        { error: 'Missing model parameter' },
+        { error: 'Missing model parameter', candidates: [] },
         { status: 400 }
       );
     }
@@ -34,13 +45,13 @@ export async function POST(request: NextRequest) {
     if (!prompt) {
       console.error('Missing prompt parameter');
       return NextResponse.json(
-        { error: 'Missing prompt parameter' },
+        { error: 'Missing prompt parameter', candidates: [] },
         { status: 400 }
       );
     }
     
     // Log request details for debugging
-    console.log(`Gemini API Request - Model: ${model}`);
+    console.log(`[Gemini API Proxy] Request - Model: ${model}`);
     
     // Correct URL construction for Gemini API
     let apiUrl;
@@ -62,7 +73,7 @@ export async function POST(request: NextRequest) {
       apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     }
     
-    console.log(`Calling Gemini API at: ${apiUrl.replace(apiKey, '[REDACTED]')}`);
+    console.log(`[Gemini API Proxy] Calling API at: ${apiUrl.replace(apiKey, '[REDACTED]')}`);
     
     // Prepare request payload
     const payload = {
@@ -99,6 +110,8 @@ export async function POST(request: NextRequest) {
       ]
     };
     
+    console.log('[Gemini API Proxy] Sending request to Google API...');
+    
     // Forward the request to Gemini API
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -111,22 +124,65 @@ export async function POST(request: NextRequest) {
     // Handle response
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Gemini API error: ${response.status} - ${errorText}`);
+      console.error(`[Gemini API Proxy] API error: ${response.status} - ${errorText}`);
+      
+      // Return a structured error response that includes an empty candidates array
+      // This allows clients to more gracefully handle errors
       return NextResponse.json(
-        { error: `Failed to generate content: ${response.status} - ${errorText}` },
+        { 
+          error: `Failed to generate content: ${response.status} - ${errorText}`,
+          candidates: [] 
+        },
         { status: response.status }
       );
     }
     
-    const data = await response.json();
-    console.log('Gemini API request successful');
-    return NextResponse.json(data);
+    // Successfully got response from Gemini
+    try {
+      const data = await response.json();
+      console.log('[Gemini API Proxy] Request successful');
+      
+      // Make sure our response always has a candidates array
+      const finalData = {
+        ...data,
+        candidates: data.candidates || []
+      };
+      
+      return NextResponse.json(finalData);
+    } catch (parseError) {
+      console.error('[Gemini API Proxy] Error parsing response:', parseError);
+      return NextResponse.json(
+        { 
+          error: 'Failed to parse Gemini API response',
+          candidates: []
+        },
+        { status: 500 }
+      );
+    }
     
   } catch (error: any) {
-    console.error('Error in Gemini API proxy:', error);
+    console.error('[Gemini API Proxy] Error:', error);
     return NextResponse.json(
-      { error: error.message || 'An error occurred while processing your request' },
+      { 
+        error: error.message || 'An error occurred while processing your request',
+        candidates: [] // Always include candidates, even if empty
+      },
       { status: 500 }
     );
   }
+}
+
+/**
+ * Handle OPTIONS requests for CORS preflight
+ */
+export async function OPTIONS(request: NextRequest) {
+  // Handle CORS preflight requests
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
 }

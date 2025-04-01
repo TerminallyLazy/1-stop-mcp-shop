@@ -33,7 +33,13 @@ export default function BuildPageClient() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="container max-w-6xl mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold text-center bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent mb-2">Build MCP Servers</h1>
+      <p className="text-center text-muted-foreground mb-8">
+        Create powerful MCP servers that enable AI assistants to perform tasks for your users.<br />
+        Just describe what you want, and we'll generate the tools and API implementations.
+      </p>
+
       <Card>
         <CardContent className="pt-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -46,7 +52,7 @@ export default function BuildPageClient() {
             <TabsContent value="build" className="pt-6">
               <ServerBuilder onToolsGenerated={handleToolsGenerated} />
             </TabsContent>
-            
+          
             <TabsContent value="deploy" className="pt-6">
               {generatedTools.length > 0 && (
                 <ServerDeployment 
@@ -57,7 +63,7 @@ export default function BuildPageClient() {
                 />
               )}
             </TabsContent>
-            
+          
             <TabsContent value="complete" className="pt-6">
               <Card>
                 <CardHeader>

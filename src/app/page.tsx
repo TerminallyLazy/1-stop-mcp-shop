@@ -1,6 +1,7 @@
 import { Navbar } from "@/components/layout/navbar";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { GridPatternSpotlight } from "@/components/ui/grid-pattern-spotlight";
 
 export default function Home() {
   return (
@@ -31,7 +32,13 @@ export default function Home() {
               <div className="flex items-center justify-center">
                 <div className="relative h-[350px] w-full overflow-hidden rounded-xl border bg-gradient-to-b from-primary/20 to-background p-4">
                   <div className="absolute inset-0 flex items-center justify-center text-lg font-medium">
-                  
+                    <div className="w-full max-w-[650px]">
+                      <GridPatternSpotlight />
+                      <div className="mt-6 text-center">
+                        <h3 className="text-xl font-semibold">Interactive MCP Tools</h3>
+                        <p className="text-sm text-muted-foreground mt-2">Build powerful AI agents with Model Context Protocol</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

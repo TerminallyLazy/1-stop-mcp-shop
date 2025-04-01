@@ -1,5 +1,5 @@
 import { Navbar } from "@/components/layout/navbar";
-import BuildPageClient from "./client";
+import { ServerBuilder } from "@/components/server/server-builder";
 
 export default function BuildPage() {
   return (
@@ -14,7 +14,8 @@ export default function BuildPage() {
               Just describe what you want, and we'll generate the tools and API implementations.
             </p>
           </div>
-          <BuildPageClient />
+          
+          <ServerBuilder />
         </div>
       </main>
     </div>

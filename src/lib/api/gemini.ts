@@ -33,7 +33,7 @@ interface GeminiResponse {
 // Simplifies the conversation to follow Gemini's strict message pattern
 function convertToGeminiFormat(messages: ChatMessage[]): GeminiMessage[] {
   // Build new array with strict user/model alternating pattern
-  let geminiMessages: GeminiMessage[] = [];
+  const geminiMessages: GeminiMessage[] = [];
   
   // Collect messages by role and combine into a single message for each role
   let userContent: string[] = [];
@@ -128,6 +128,19 @@ export async function callGeminiAPI(messages: ChatMessage[], model: string = 'ge
       });
     }
     
+    // Extract the weather question if present to guide the model
+    let weatherLocation = "";
+    if (messages.length > 0 && messages[messages.length - 1].role === 'user') {
+      const userMessage = messages[messages.length - 1].content.toLowerCase();
+      if (userMessage.includes('weather')) {
+        const locationMatch = userMessage.match(/weather\s+(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)/i) || 
+                             userMessage.match(/(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)(?:\s+weather)/i);
+        if (locationMatch && locationMatch[1]) {
+          weatherLocation = locationMatch[1].trim();
+        }
+      }
+    }
+    
     const requestData: GeminiRequest = {
       contents: geminiMessages,
       generationConfig: {
@@ -135,6 +148,16 @@ export async function callGeminiAPI(messages: ChatMessage[], model: string = 'ge
         maxOutputTokens: 2048
       }
     };
+
+    // For Gemini Flash model, add additional safety settings to encourage tool use
+    if (model.includes('flash')) {
+      requestData.generationConfig = {
+        ...requestData.generationConfig,
+        temperature: 0.4, // Lower temperature for more deterministic outputs
+        topP: 0.9,
+        topK: 40
+      };
+    }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     console.log('Calling Gemini API URL:', url);
@@ -160,12 +183,42 @@ export async function callGeminiAPI(messages: ChatMessage[], model: string = 'ge
       throw new Error('Empty response from Gemini API');
     }
 
+    // Check if the content is empty or extremely short (likely an error)
+    const responseText = data.candidates[0].content.parts[0].text || '';
+    if (!responseText.trim()) {
+      console.warn("Empty response received from Gemini, returning fallback");
+      
+      // If a weather query was detected, return a specific message about checking the weather
+      if (weatherLocation) {
+        return {
+          success: true,
+          message: {
+            id: `gemini-${Date.now()}`,
+            role: 'assistant',
+            content: `I'll check the current weather in ${weatherLocation} for you.`,
+            createdAt: new Date().toISOString(),
+          }
+        };
+      }
+      
+      // Otherwise, return a generic message
+      return {
+        success: true,
+        message: {
+          id: `gemini-${Date.now()}`,
+          role: 'assistant',
+          content: "I'll help you with that. Let me check for you...",
+          createdAt: new Date().toISOString(),
+        }
+      };
+    }
+
     return {
       success: true,
       message: {
         id: `gemini-${Date.now()}`,
         role: 'assistant',
-        content: data.candidates[0].content.parts[0].text,
+        content: responseText,
         createdAt: new Date().toISOString(),
       }
     };

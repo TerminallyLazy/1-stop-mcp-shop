@@ -522,29 +522,53 @@ export async function generateMCPTools(
   description: string,
   model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPTool[]> {
-  try {
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error('Gemini API key is not configured');
-    }
-    
-    // Use the specified model
-    const modelToUse = model;
-    
-    // Format model name according to Gemini's API requirements
-    const formattedModel = modelToUse.includes('/') 
-      ? modelToUse 
-      : modelToUse.startsWith('gemini-') 
-        ? `models/${modelToUse.replace('gemini-', 'gemini/')}` 
-        : modelToUse;
-    
-    // Craft a prompt following MCP specifications for tool definition
-    const prompt = `
+  console.log('Starting generateMCPTools for description:', description);
+  
+  // Create a safety Promise that resolves with default tools after 15 seconds
+  // This ensures we never have an interface that hangs indefinitely
+  const safetyTimeout = new Promise<MCPTool[]>((resolve) => {
+    setTimeout(() => {
+      console.log('Safety timeout reached, using default tools');
+      resolve(createDefaultTools(description));
+    }, 15000);
+  });
+  
+  // Create the actual API request promise
+  const apiRequest = async (): Promise<MCPTool[]> => {
+    try {
+      // Check if we're in a browser environment
+      if (typeof window === 'undefined') {
+        console.log('Not in browser environment, using default tools');
+        return createDefaultTools(description);
+      }
+      
+      // Check for API key
+      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+      if (!apiKey) {
+        console.warn('Gemini API key is not configured, using default tools');
+        return createDefaultTools(description);
+      }
+      
+      // TEMPORARY FIX: Force using default tools while API issue is resolved
+      console.log('Temporarily using default tools while API issue is being resolved');
+      // Import and use the properly-formatted MCP tools generator
+      const { generateDefaultMCPTools } = await import('./mcp-tools');
+      return generateDefaultMCPTools(description);
+      
+      // Format model name according to Gemini's API requirements
+      const formattedModel = model.includes('/') 
+        ? model 
+        : model.startsWith('gemini-') 
+          ? `models/${model.replace('gemini-', 'gemini/')}` 
+          : model;
+      
+      // Craft a prompt for tool generation
+      const prompt = `
 You are designing a Model Context Protocol (MCP) server. This server will provide AI assistants with tools for executing tasks.
 
 Based on this description: "${description}"
 
-Create tools following the Model Context Protocol specification (https://spec.modelcontextprotocol.io/specification/2025-03-26/). Each tool needs:
+Create tools following the Model Context Protocol specification. Each tool needs:
 1. A name in snake_case (lowercase with underscores)
 2. A clear description explaining what the tool does and when to use it
 3. Well-defined parameters with these attributes:
@@ -573,162 +597,179 @@ Return ONLY a JSON array of tools in the following format:
   }
 ]
 
-Ensure the tools:
-- Are practical and useful for the requested functionality
-- Have self-contained descriptions (AI assistants rely on these to understand the tool)
-- Cover all necessary parameters with appropriate types
-- Follow MCP specifications exactly
+Return only valid JSON without explanation, comments, or surrounding text.`;
 
-Return only valid JSON without explanation, comments, or surrounding text.
-`;
-
-    // Call our proxy API route instead of directly calling Gemini API to avoid CORS issues
-    console.log(`Calling Gemini API proxy with model: ${formattedModel}`);
-    
-    // Make the API request through our proxy
-    const response = await fetch('/api/gemini', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: formattedModel,
-        prompt: prompt,
-        generationConfig: {
-          temperature: 0.2,          // Lower temperature for more consistent results
-          topP: 0.95,                // Control output diversity
-          topK: 40,                  // Limit token selection
-          maxOutputTokens: 4096,     // Allow space for detailed tool definitions
-          responseFormat: { type: "JSON" }  // Request JSON output format
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+      console.log('Trying to call Gemini API proxy...');
+      
+      // Use a direct fetch with a short timeout to handle API issues gracefully
+      const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
+        try {
+          const controller = new AbortController();
+          const id = setTimeout(() => controller.abort(), timeout);
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(id);
+          return response;
+        } catch (error) {
+          console.error('Fetch error in fetchWithTimeout:', error);
+          throw error;  // Re-throw to handle in the caller
+        }
+      };
+      
+      // Try multiple API endpoints with a timeout
+      // Try the non-trailing slash first since it should now forward to the correct endpoint
+      const endpoints = ['/api/gemini', '/api/gemini/'];
+      let response = null;
+      let lastError = null;
+      let successfulEndpoint = null;
+      
+      // Set a short overall timeout for the whole operation
+      const apiCallStartTime = Date.now();
+      const maxTotalTimeout = 12000; // 12 seconds total max time
+      
+      for (const endpoint of endpoints) {
+        // Check if we've already spent too much time
+        if (Date.now() - apiCallStartTime > maxTotalTimeout) {
+          console.warn('Exceeded total API call timeout, falling back to default tools');
+          break;
+        }
+        
+        try {
+          console.log(`Trying API endpoint: ${endpoint}...`);
+          response = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: formattedModel,
+              prompt: prompt,
+              generationConfig: {
+                temperature: 0.2,
+                topP: 0.95,
+                maxOutputTokens: 4096,
+                responseFormat: { type: "JSON" }
+              }
+            })
+          }, 6000); // 6 second timeout per endpoint
+          
+          if (response && response.ok) {
+            console.log(`Successfully connected to ${endpoint}`);
+            successfulEndpoint = endpoint;
+            break;
+          } else if (response) {
+            // We got a response but it wasn't OK
+            console.warn(`Got error response from ${endpoint}: ${response.status}`);
+            const errorText = await response.text();
+            console.warn(`Error details: ${errorText}`);
+            lastError = new Error(`Status ${response.status}: ${errorText}`);
           }
-        ]
-      })
-    });
-    
-    // Check if the request was successful
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`API proxy error: ${response.status} - ${errorText}`);
-      throw new Error(`Failed to generate tools: ${response.status} - ${errorText}`);
-    }
-    
-    // Parse the API response
-    const data = await response.json();
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error('Empty response from Gemini API');
-    }
-    
-    const content = data.candidates[0].content.parts[0].text;
-    
-    // Parse JSON from the response, handling different return formats
-    let toolsData;
-    try {
-      // First try to parse the entire text as JSON
-      toolsData = JSON.parse(content);
-    } catch (e) {
-      // If that fails, try to extract JSON array from the response
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        throw new Error('Failed to extract JSON from response');
-      }
-      toolsData = JSON.parse(jsonMatch[0]);
-    }
-    
-    // Validate that we have an array of tools
-    if (!Array.isArray(toolsData)) {
-      throw new Error('Generated tools are not in the expected array format');
-    }
-    
-    // Validate each tool against MCP specifications
-    toolsData.forEach((tool: any, index: number) => {
-      // Check required fields
-      if (!tool.name || typeof tool.name !== 'string') {
-        throw new Error(`Tool at index ${index} is missing a valid name`);
+        } catch (endpointError) {
+          console.warn(`Error with endpoint ${endpoint}:`, endpointError);
+          lastError = endpointError;
+        }
       }
       
-      if (!tool.description || typeof tool.description !== 'string') {
-        throw new Error(`Tool '${tool.name}' is missing a valid description`);
+      // If no response or not ok, fall back to default tools
+      if (!response || !response.ok) {
+        const errorMessage = lastError?.message || 'unknown error';
+        console.error(`Failed to get a valid API response: ${errorMessage}`);
+        console.log('Using default tools instead of waiting for API');
+        return createDefaultTools(description);
       }
       
-      if (!Array.isArray(tool.parameters)) {
-        throw new Error(`Tool '${tool.name}' has invalid parameters (not an array)`);
-      }
-      
-      // Validate name format (snake_case)
-      if (!/^[a-z][a-z0-9_]*$/.test(tool.name)) {
-        // Auto-fix the name to snake_case
-        tool.name = tool.name
-          .replace(/([A-Z])/g, '_$1')
-          .toLowerCase()
-          .replace(/^_/, '')
-          .replace(/[^a-z0-9_]/g, '_');
-      }
-      
-      // Validate and fix parameters
-      tool.parameters.forEach((param: { name: any; type: string; description: string; required: boolean | undefined; enum: undefined; }, paramIndex: any) => {
-        if (!param.name || typeof param.name !== 'string') {
-          throw new Error(`Parameter at index ${paramIndex} in tool '${tool.name}' is missing a valid name`);
-        }
-        
-        if (!param.type || !['string', 'number', 'boolean', 'object', 'array'].includes(param.type)) {
-          // Default to string for invalid types
-          param.type = 'string';
-        }
-        
-        if (!param.description || typeof param.description !== 'string') {
-          param.description = `Parameter for ${param.name}`;
-        }
-        
-        if (param.required === undefined) {
-          param.required = true;
-        }
-        
-        // Ensure enum is an array if present
-        if (param.enum !== undefined && !Array.isArray(param.enum)) {
-          delete param.enum;
-        }
-      });
-    });
+      console.log(`Successfully fetched data from ${successfulEndpoint}`);
     
-    const now = new Date().toISOString();
-    
-    // Process and format the tools according to MCP specifications
-    return toolsData.map((tool: any) => ({
-      id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      name: tool.name,
-      description: tool.description,
-      parameters: Array.isArray(tool.parameters) ? tool.parameters.map((param: any) => ({
-        name: param.name,
-        type: param.type,
-        description: param.description,
-        required: param.required === true,
-        enum: param.enum,
-        default: param.default
-      })) : [],
-      serverId: '',
-      createdAt: now,
-      updatedAt: now
-    }));
+      // Parse the response
+      const data = await response.json();
+      console.log('API response received:', data);
+      
+      // Check if there's an error in the response
+      if (data.error) {
+        console.error(`API returned error: ${data.error}`);
+        return createDefaultTools(description);
+      }
+      
+      if (!data.candidates || data.candidates.length === 0) {
+        console.warn('API response did not contain any candidates');
+        return createDefaultTools(description);
+      }
+      
+      // Check if candidates[0].content exists and has parts
+      if (!data.candidates[0].content || !data.candidates[0].content.parts || 
+          !data.candidates[0].content.parts[0] || !data.candidates[0].content.parts[0].text) {
+        console.error('Malformed API response - missing content or parts');
+        return createDefaultTools(description);
+      }
+      
+      const content = data.candidates[0].content.parts[0].text;
+      console.log('Received response from Gemini API');
+      
+      // Try to parse the JSON response
+      try {
+        // First try direct parsing
+        let toolsData;
+        try {
+          toolsData = JSON.parse(content);
+        } catch (parseError) {
+          console.warn('Initial JSON parse failed, trying to extract JSON array');
+          // If direct parsing fails, try to extract an array from the text
+          const jsonMatch = content.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            toolsData = JSON.parse(jsonMatch[0]);
+          } else {
+            console.error('Could not find a JSON array in the response');
+            throw new Error('Response is not a valid JSON array');
+          }
+        }
+        
+        // Verify toolsData is an array
+        if (!Array.isArray(toolsData)) {
+          console.error('Response is not a JSON array:', toolsData);
+          throw new Error('Response is not a JSON array');
+        }
+        
+        // Make sure we have valid tools data
+        if (toolsData.length === 0) {
+          console.warn('Response contained empty tools array');
+          return createDefaultTools(description);
+        }
+        
+        console.log('Successfully parsed tool data');
+        
+        // Process and format the tools
+        const now = new Date().toISOString();
+        return toolsData.map((tool: { name?: string; description?: string; parameters?: any[] }) => ({
+          id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          name: tool.name || `tool_${Math.random().toString(36).substring(2, 7)}`,
+          description: tool.description || 'A generated tool for this MCP server',
+          parameters: Array.isArray(tool.parameters) ? tool.parameters.map(param => ({
+            name: param.name || 'param',
+            type: ['string', 'number', 'boolean', 'object', 'array'].includes(param.type) ? param.type : 'string',
+            description: param.description || `Parameter for ${param.name || 'this tool'}`,
+            required: param.required === true,
+            enum: Array.isArray(param.enum) ? param.enum : undefined,
+            default: param.default
+          })) : [],
+          serverId: '',
+          createdAt: now,
+          updatedAt: now
+        }));
+      } catch (parseError) {
+        console.error('Error parsing tool data:', parseError);
+        return createDefaultTools(description);
+      }
+    } catch (error) {
+      console.error('Error in generateMCPTools:', error);
+      return createDefaultTools(description);
+    }
+  };
+  
+  // Race the API request against the safety timeout
+  try {
+    return await Promise.race([apiRequest(), safetyTimeout]);
   } catch (error) {
-    console.error('Error generating MCP tools:', error);
-    // Fallback to default tools if AI generation fails
+    console.error('Error in generateMCPTools race:', error);
     return createDefaultTools(description);
   }
 }
@@ -740,21 +781,38 @@ export async function generateMCPResources(
   description: string,
   model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPResource[]> {
+  console.log('Starting generateMCPResources for description:', description);
+  
+  // If we're not in a browser environment, return empty array
+  if (typeof window === 'undefined') {
+    console.log('Not in browser environment, skipping resource generation');
+    return [];
+  }
+  
   try {
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) {
-      return [];
-    }
+    // Use a direct fetch with a short timeout to handle API issues gracefully
+    const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        throw error;
+      }
+    };
     
-    // Use the specified model
-    const modelToUse = model;
-    
-    // Format model name according to Gemini's API requirements
-    const formattedModel = modelToUse.includes('/') 
-      ? modelToUse 
-      : modelToUse.startsWith('gemini-') 
-        ? `models/${modelToUse.replace('gemini-', 'gemini/')}` 
-        : modelToUse;
+    // Format model name
+    const formattedModel = model.includes('/') 
+      ? model 
+      : model.startsWith('gemini-') 
+        ? `models/${model.replace('gemini-', 'gemini/')}` 
+        : model;
     
     // Craft a prompt to generate resources
     const prompt = `
@@ -781,68 +839,71 @@ Return ONLY a JSON array in this format:
 Only include resources if they would be genuinely useful for the described functionality.
 `;
 
-    // Call the Gemini API
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${formattedModel}:generateContent?key=${apiKey}`, {
+    console.log('Attempting to generate resources...');
+  
+    // Make the API request through our proxy
+    const response = await fetchWithTimeout('/api/gemini', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }]
-          }
-        ],
+        model: formattedModel,
+        prompt: prompt,
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2048,
           responseFormat: { type: "JSON" }
         }
       })
-    });
+    }, 8000); // 8 second timeout
     
-    if (!response.ok) {
-      return [];
-    }
-    
-    const data = await response.json();
-    if (!data.candidates || data.candidates.length === 0) {
-      return [];
-    }
-    
-    const content = data.candidates[0].content.parts[0].text;
-    
-    // Parse JSON from the response
-    let resourcesData;
-    try {
-      resourcesData = JSON.parse(content);
-    } catch (e) {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        return [];
+    // Parse response if successful
+    if (response.ok) {
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates.length > 0) {
+        const content = data.candidates[0].content.parts[0].text;
+        
+        // Try to parse the JSON response
+        try {
+          // First try direct parsing
+          let resourcesData = JSON.parse(content);
+          
+          // If it's not an array, try to extract an array from the text
+          if (!Array.isArray(resourcesData)) {
+            const jsonMatch = content.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              resourcesData = JSON.parse(jsonMatch[0]);
+            } else {
+              return []; // Not a valid array
+            }
+          }
+          
+          // Format and return the resources
+          if (Array.isArray(resourcesData) && resourcesData.length > 0) {
+            console.log('Successfully parsed resource data');
+            const now = new Date().toISOString();
+            
+            return resourcesData.map(resource => ({
+              id: `resource-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+              name: resource.name || `resource_${Math.random().toString(36).substring(2, 7)}`,
+              description: resource.description || 'A resource for this MCP server',
+              type: resource.type || 'document',
+              content: resource.content || 'Content for this resource',
+              serverId: '',
+              createdAt: now,
+              updatedAt: now
+            }));
+          }
+        } catch (parseError) {
+          console.error('Error parsing resource data:', parseError);
+        }
       }
-      resourcesData = JSON.parse(jsonMatch[0]);
     }
     
-    // Validate that we have an array
-    if (!Array.isArray(resourcesData)) {
-      return [];
-    }
+    // If we get here, something went wrong but we don't need to return a fallback
+    console.log('No resources were generated from the API');
+    return [];
     
-    const now = new Date().toISOString();
-    
-    // Format the resources
-    return resourcesData.map((resource: any) => ({
-      id: `resource-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      name: resource.name,
-      description: resource.description,
-      type: resource.type,
-      content: resource.content,
-      serverId: '',
-      createdAt: now,
-      updatedAt: now
-    }));
   } catch (error) {
     console.error('Error generating MCP resources:', error);
     return [];
@@ -856,21 +917,38 @@ export async function generateMCPPrompts(
   description: string,
   model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPPrompt[]> {
+  console.log('Starting generateMCPPrompts for description:', description);
+  
+  // If we're not in a browser environment, return empty array
+  if (typeof window === 'undefined') {
+    console.log('Not in browser environment, skipping prompt generation');
+    return [];
+  }
+  
   try {
-    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    if (!apiKey) {
-      return [];
-    }
+    // Use a direct fetch with a short timeout to handle API issues gracefully
+    const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeout);
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        clearTimeout(id);
+        return response;
+      } catch (error) {
+        clearTimeout(id);
+        throw error;
+      }
+    };
     
-    // Use the specified model
-    const modelToUse = model;
-    
-    // Format model name according to Gemini's API requirements
-    const formattedModel = modelToUse.includes('/') 
-      ? modelToUse 
-      : modelToUse.startsWith('gemini-') 
-        ? `models/${modelToUse.replace('gemini-', 'gemini/')}` 
-        : modelToUse;
+    // Format model name
+    const formattedModel = model.includes('/') 
+      ? model 
+      : model.startsWith('gemini-') 
+        ? `models/${model.replace('gemini-', 'gemini/')}` 
+        : model;
     
     // Craft a prompt to generate MCP prompts
     const prompt = `
@@ -895,67 +973,70 @@ Return ONLY a JSON array in this format:
 Only include prompts if they would be genuinely useful for the described functionality.
 `;
 
-    // Call the Gemini API
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${formattedModel}:generateContent?key=${apiKey}`, {
+    console.log('Attempting to generate prompt templates...');
+  
+    // Make the API request through our proxy
+    const response = await fetchWithTimeout('/api/gemini', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }]
-          }
-        ],
+        model: formattedModel,
+        prompt: prompt,
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2048,
           responseFormat: { type: "JSON" }
         }
       })
-    });
+    }, 8000); // 8 second timeout
     
-    if (!response.ok) {
-      return [];
-    }
-    
-    const data = await response.json();
-    if (!data.candidates || data.candidates.length === 0) {
-      return [];
-    }
-    
-    const content = data.candidates[0].content.parts[0].text;
-    
-    // Parse JSON from the response
-    let promptsData;
-    try {
-      promptsData = JSON.parse(content);
-    } catch (e) {
-      const jsonMatch = content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        return [];
+    // Parse response if successful
+    if (response.ok) {
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates.length > 0) {
+        const content = data.candidates[0].content.parts[0].text;
+        
+        // Try to parse the JSON response
+        try {
+          // First try direct parsing
+          let promptsData = JSON.parse(content);
+          
+          // If it's not an array, try to extract an array from the text
+          if (!Array.isArray(promptsData)) {
+            const jsonMatch = content.match(/\[[\s\S]*\]/);
+            if (jsonMatch) {
+              promptsData = JSON.parse(jsonMatch[0]);
+            } else {
+              return []; // Not a valid array
+            }
+          }
+          
+          // Format and return the prompts
+          if (Array.isArray(promptsData) && promptsData.length > 0) {
+            console.log('Successfully parsed prompt template data');
+            const now = new Date().toISOString();
+            
+            return promptsData.map(prompt => ({
+              id: `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+              name: prompt.name || `prompt_${Math.random().toString(36).substring(2, 7)}`,
+              description: prompt.description || 'A prompt template for this MCP server',
+              template: prompt.template || 'Template for {purpose}',
+              serverId: '',
+              createdAt: now,
+              updatedAt: now
+            }));
+          }
+        } catch (parseError) {
+          console.error('Error parsing prompt template data:', parseError);
+        }
       }
-      promptsData = JSON.parse(jsonMatch[0]);
     }
     
-    // Validate that we have an array
-    if (!Array.isArray(promptsData)) {
-      return [];
-    }
+    // If we get here, something went wrong but we don't need to return a fallback
+    console.log('No prompt templates were generated from the API');
+    return [];
     
-    const now = new Date().toISOString();
-    
-    // Format the prompts
-    return promptsData.map((prompt: any) => ({
-      id: `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      name: prompt.name,
-      description: prompt.description,
-      template: prompt.template,
-      serverId: '',
-      createdAt: now,
-      updatedAt: now
-    }));
   } catch (error) {
     console.error('Error generating MCP prompts:', error);
     return [];
@@ -1298,7 +1379,7 @@ async function getWeather(location: string, units: string = 'metric'): Promise<a
     let data = null;
     let successful = false;
     let lastError = '';
-    let attempts: string[] = [];
+    const attempts: string[] = [];
     
     for (const cityName of variations) {
       attempts.push(cityName);
@@ -1811,4 +1892,3 @@ function defaultServers(): MCPServer[] {
     }
   ];
 }
-

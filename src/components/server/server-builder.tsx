@@ -4,15 +4,13 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { MCPTool } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-// Define the callback type
-type ToolsGeneratedCallback = (tools: MCPTool[], description: string) => void;
-
-// Define the props type
+// Define the callback type explicitly
 interface ServerBuilderProps {
-  onToolsGenerated?: ToolsGeneratedCallback;
+  onToolsGenerated?: (tools: MCPTool[], description: string) => void;
 }
 
 export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
@@ -21,6 +19,8 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
   const [generatedTools, setGeneratedTools] = useState<MCPTool[]>([]);
   const [generationModel, setGenerationModel] = useState<"gemini-2.5-pro-exp-03-25" | "openai/gpt-4">("gemini-2.5-pro-exp-03-25");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [messages, setMessages] = useState<{role: "ai" | "user", content: string}[]>([]);
+  const [userInput, setUserInput] = useState("");
 
   const exampleCategories = [
     { id: "all", name: "All Templates" },
@@ -95,11 +95,11 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
       // Update state with the real generated tools
       setGeneratedTools(generatedTools);
       
-      // Call the callback function if provided
-      if (onToolsGenerated) {
-        // Use type assertion to tell TypeScript this is callable
-        (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(generatedTools, description);
-      }
+      // Add AI message about the tools generated
+      addAiMessage(generatedTools);
+      
+      // Don't auto-trigger the callback to move to deployment
+      // Let the user explicitly click the Deploy button
     } catch (error) {
       console.error("Error generating tools:", error);
       // Fallback to default tools if API fails
@@ -107,9 +107,9 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
       const fallbackTools = createDefaultTools(description);
       setGeneratedTools(fallbackTools);
       
-      if (onToolsGenerated) {
-        (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(fallbackTools, description);
-      }
+      // Add AI message about the tools generated (fallback)
+      addAiMessage(fallbackTools);
+      setMessages(prev => [...prev, { role: 'ai', content: 'Note: I used default tools because there was an issue connecting to the AI service.' }]);
     } finally {
       setIsGenerating(false);
     }
@@ -177,122 +177,209 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
     }
   };
 
+  // Add a simulated message from AI when tools are generated
+  const addAiMessage = (tools: MCPTool[]) => {
+    const toolNamesList = tools.map(t => `'${t.name}'`).join(', ');
+    setMessages(prev => [
+      ...prev, 
+      { 
+        role: 'ai', 
+        content: `I've created the following tools based on your requirements: ${toolNamesList}. You can view and modify them in the panel on the right.` 
+      }
+    ]);
+  };
+
+  // Handle user message submission
+  const handleMessageSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!userInput.trim()) return;
+
+    // Add user message
+    setMessages(prev => [...prev, { role: 'user', content: userInput }]);
+    
+    // Store the input in description for tool generation
+    setDescription(userInput);
+    
+    // Clear input field
+    setUserInput('');
+    
+    // Simulate AI is thinking
+    setTimeout(() => {
+      setMessages(prev => [...prev, { role: 'ai', content: 'I\'m generating MCP tools based on your requirements...' }]);
+      // Generate tools
+      handleGenerate();
+    }, 1000);
+  };
+
+  // Modify handleGenerate to add AI message with tool info
+  const originalHandleGenerate = handleGenerate;
+  const enhancedHandleGenerate = async () => {
+    try {
+      await originalHandleGenerate();
+      // The tools will be set in state by originalHandleGenerate
+      // We'll add an AI message in the success branch of that function
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'ai', content: `I encountered an error while generating tools: ${error}` }]);
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="md:col-span-1 space-y-4">
-          <div className="border rounded-lg p-4">
-            <h3 className="font-medium mb-3">Categories</h3>
-            <div className="space-y-2">
-              {exampleCategories.map(category => (
-                <Button 
-                  key={category.id}
-                  variant={selectedCategory === category.id ? "default" : "ghost"}
-                  className="w-full justify-start"
-                  onClick={() => setSelectedCategory(category.id)}
-                >
-                  {category.name}
-                </Button>
-              ))}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-12rem)]">
+      {/* Left Side - Chat Interface */}
+      <div className="border rounded-lg flex flex-col overflow-hidden">
+        <div className="bg-primary/5 p-3 border-b">
+          <h3 className="font-medium">Chat with AI to Build Your MCP Server</h3>
+        </div>
+        
+        {/* Messages area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">
+              <p>Describe what tools you want your MCP server to have.</p>
+              <p className="text-sm mt-2">Example: "I need a weather API that can show current conditions and forecasts."</p>
             </div>
-          </div>
-          
-          <div className="border rounded-lg p-4">
-            <h3 className="font-medium mb-3">AI Model</h3>
-            <div className="space-y-2">
-              <Button 
-                variant={generationModel === "gemini-2.5-pro-exp-03-25" ? "default" : "ghost"}
-                className="w-full justify-start"
-                onClick={() => setGenerationModel("gemini-2.5-pro-exp-03-25")}
-              >
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-                    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-                    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
-                  </svg>
-                  <span>Gemini 2.5 Pro</span>
+          ) : (
+            messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`rounded-lg max-w-[80%] px-4 py-2 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>
+                  {msg.content}
                 </div>
-              </Button>
+              </div>
+            ))
+          )}
+        </div>
+        
+        {/* Input area */}
+        <form onSubmit={handleMessageSubmit} className="border-t p-3 flex gap-2">
+          <Input 
+            value={userInput} 
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value)} 
+            placeholder="Describe the tools you want..."
+            className="flex-1"
+          />
+          <Button type="submit" disabled={isGenerating || !userInput.trim()}>
+            {isGenerating ? (
+              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                <path d="m22 2-7 20-4-9-9-4Z" />
+                <path d="M22 2 11 13" />
+              </svg>
+            )}
+          </Button>
+        </form>
+      </div>
+      
+      {/* Right Side - Tools Panel */}
+      <div className="border rounded-lg flex flex-col overflow-hidden">
+        <div className="bg-primary/5 p-3 border-b flex justify-between items-center">
+          <h3 className="font-medium">MCP Tools</h3>
+          <div className="flex gap-2">
+            <select 
+              className="text-sm border rounded px-2 py-1 bg-background" 
+              value={generationModel}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGenerationModel(e.target.value as "gemini-2.5-pro-exp-03-25" | "openai/gpt-4")}
+            >
+              <option value="gemini-2.5-pro-exp-03-25">Gemini 2.5 Pro</option>
+              <option value="openai/gpt-4">GPT-4</option>
+            </select>
+            
+            {generatedTools.length > 0 && (
               <Button 
-                variant={generationModel === "openai/gpt-4" ? "default" : "ghost"}
-                className="w-full justify-start"
-                onClick={() => setGenerationModel("openai/gpt-4")}
+                size="sm" 
+                onClick={() => {
+                  // Handle the callback safely with proper typing
+                  if (typeof onToolsGenerated === 'function') {
+                    (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(generatedTools, description);
+                  } else {
+                    console.error('onToolsGenerated callback is not provided');
+                  }
+                }}
+                className="text-xs"
               >
-                <div className="flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25" />
-                    <line x1="8" y1="16" x2="8.01" y2="16" />
-                    <line x1="8" y1="20" x2="8.01" y2="20" />
-                    <line x1="12" y1="18" x2="12.01" y2="18" />
-                    <line x1="12" y1="22" x2="12.01" y2="22" />
-                    <line x1="16" y1="16" x2="16.01" y2="16" />
-                    <line x1="16" y1="20" x2="16.01" y2="20" />
-                  </svg>
-                  <span>GPT-4</span>
-                </div>
+                Deploy
               </Button>
-            </div>
+            )}
           </div>
         </div>
         
-        <div className="md:col-span-3">
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Create Your MCP Server</CardTitle>
-              <CardDescription>
-                Tell us what capabilities you want your AI to have, and we'll create the implementation
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                placeholder="I want to create a weather tool that can show current weather and forecasts for any city in the world"
-                className="min-h-32 mb-4 w-full"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              
-              <div>
-                <h3 className="text-sm font-medium mb-4">Or start with a template:</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredExamples.map((example) => (
-                    <Button 
-                      key={example.id}
-                      variant="outline" 
-                      className="h-auto py-4 px-4 flex flex-col items-start space-y-2 hover:border-primary hover:bg-primary/5 transition-colors w-full"
-                      onClick={() => setDescription(example.description)}
-                    >
-                      <div className="rounded-full bg-primary/10 p-2">
-                        {getIconForExample(example.id)}
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium">{example.name}</div>
-                        <div className="text-xs text-muted-foreground line-clamp-2 overflow-hidden text-ellipsis break-words w-full">{example.description}</div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter>
-              <Button 
-                className="w-full" 
-                onClick={handleGenerate}
-                disabled={isGenerating || !description.trim()}
-              >
-                {isGenerating ? (
-                  <div className="flex items-center space-x-2">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span>Generating...</span>
+        {/* Tools display area */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {generatedTools.length === 0 ? (
+            <div className="text-center text-muted-foreground py-8">
+              <p>Your MCP tools will appear here once generated</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {generatedTools.map((tool) => (
+                <div key={tool.id} className="border rounded-lg">
+                  <div className="flex items-center p-3 bg-muted/50 border-b">
+                    <div className="rounded-full bg-primary/10 p-1.5 mr-3">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-medium">{tool.name}</h4>
+                      <p className="text-sm text-muted-foreground">{tool.description}</p>
+                    </div>
+                    <div className="bg-primary/10 text-primary text-xs py-1 px-2 rounded-full">
+                      {tool.parameters.length} {tool.parameters.length === 1 ? 'parameter' : 'parameters'}
+                    </div>
                   </div>
-                ) : "Generate My AI Tools"}
-              </Button>
-            </CardFooter>
-          </Card>
+                  <div className="p-3 space-y-2">
+                    <h5 className="text-sm font-medium">Parameters:</h5>
+                    {tool.parameters.map((param) => (
+                      <div key={param.name} className="flex flex-col bg-muted/30 p-2 rounded">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <code className="text-sm font-mono bg-background px-1 py-0.5 rounded">{param.name}</code>
+                            <span className="text-xs text-primary border border-primary/20 bg-primary/5 px-1 rounded">{param.type}</span>
+                            {param.required && <span className="text-xs text-red-500">required</span>}
+                          </div>
+                          {param.enum && (
+                            <div className="text-xs text-muted-foreground">Options: {param.enum.join(', ')}</div>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">{param.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+        
+        {/* Action buttons for empty state */}
+        {generatedTools.length === 0 && (
+          <div className="border-t p-3">
+            <Button 
+              className="w-full" 
+              onClick={() => {
+                // Add a user message if chat is empty
+                if (messages.length === 0) {
+                  setMessages([{ role: 'user', content: description || 'Generate MCP tools for me' }]);
+                }
+                handleGenerate();
+              }}
+              disabled={isGenerating || !description.trim()}
+            >
+              {isGenerating ? (
+                <div className="flex items-center space-x-2">
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Generating...</span>
+                </div>
+              ) : "Generate MCP Tools"}
+            </Button>
+          </div>
+        )}
       </div>
       
       {generatedTools.length > 0 && !onToolsGenerated && (
@@ -330,14 +417,13 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
             <Button 
               className="w-full"
               onClick={() => {
-                // Create a temporary function to avoid TypeScript errors
-                const handleContinue = () => {
-                  if (onToolsGenerated) {
-                    // Use type assertion to tell TypeScript this is callable
-                    (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(generatedTools, description);
-                  }
-                };
-                handleContinue();
+                console.log('Continue to Deployment clicked with tools:', generatedTools);
+                // Handle the callback safely with proper typing
+                if (typeof onToolsGenerated === 'function') {
+                  (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(generatedTools, description);
+                } else {
+                  console.error('onToolsGenerated callback is not provided');
+                }
               }}
             >
               Continue to Deployment

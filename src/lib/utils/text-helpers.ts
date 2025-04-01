@@ -27,34 +27,34 @@ export function extractCityName(input: string): string {
   ];
   
   // Try each pattern in order
-  for (const pattern of patterns) {
-    const match = cleanedInput.match(pattern);
-    if (match && match[1]) {
-      // Clean up the extracted city name
-      const extractedCity = match[1].trim();
+  // for (const pattern of patterns) {
+  //   const match = cleanedInput.match(pattern);
+  //   if (match && match[1]) {
+  //     // Clean up the extracted city name
+  //     const extractedCity = match[1].trim();
       
-      // Handle special case for "seattle." (with period) or similar
-      if (extractedCity.toLowerCase() === 'seattle.') {
-        return 'Seattle';
-      }
+  //     // Handle special case for "seattle." (with period) or similar
+  //     if (extractedCity.toLowerCase() === 'seattle.') {
+  //       return 'Seattle';
+  //     }
       
       // Handle specific known cities with different casing
-      const knownCities: Record<string, string> = {
-        'new york': 'New York',
-        'los angeles': 'Los Angeles',
-        'san francisco': 'San Francisco',
-        'seattle': 'Seattle',
-        'new york, us': 'New York'
-      };
+      // const knownCities: Record<string, string> = {
+      //   'new york': 'New York',
+      //   'los angeles': 'Los Angeles',
+      //   'san francisco': 'San Francisco',
+      //   'seattle': 'Seattle',
+      //   'new york, us': 'New York'
+      // };
       
-      const lowerCity = extractedCity.toLowerCase();
-      if (knownCities[lowerCity]) {
-        return knownCities[lowerCity];
-      }
+      // const lowerCity = extractedCity.toLowerCase();
+      // if (knownCities[lowerCity]) {
+      //   return knownCities[lowerCity];
+      // }
       
-      return extractedCity;
-    }
-  }
+//       return extractedCity;
+//     }
+//   }
   
   // If no patterns match, just return the original input
   return cleanedInput;

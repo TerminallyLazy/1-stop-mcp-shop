@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { callGeminiAPI } from "@/lib/api/gemini";
-import { callOpenRouterAPI } from "@/lib/api/openrouter";
+import { callAnthropicAPI } from "@/lib/api/anthropic";
 import { ChatMessage, MCPServer, ToolCall } from "@/lib/types";
 import { listMCPServers } from "@/lib/api/mcp";
 import { getUserSession } from "@/lib/supabase";
@@ -18,12 +18,14 @@ export function EnhancedMCPClientUpdated() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
+  const [selectedModel, setSelectedModel] = useState("claude-3-sonnet-20240229");
   const [availableServers, setAvailableServers] = useState<MCPServer[]>([]);
   const [installedServers, setInstalledServers] = useState<MCPServer[]>([]);
   const [showServerDialog, setShowServerDialog] = useState(false);
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCall[]>([]);
   const [userSession, setUserSession] = useState<{user: any, subscription?: string}|null>(null);
+  const [serverUrl, setServerUrl] = useState<string>("");
+  const [configProcessing, setConfigProcessing] = useState<boolean>(false);
 
   // Fetch user session and available servers
   useEffect(() => {
@@ -118,7 +120,46 @@ export function EnhancedMCPClientUpdated() {
     
     // If no structured MCP calls found, fall back to regex pattern matching
     if (toolCalls.length === 0) {
-      // Check for tool call indicators in the message content
+      // Check for common Gemini output patterns like: "tool_name(params)" or "tool_code tool_name(params)"
+      // This regex is more flexible to handle Gemini's formatting of tool calls
+      const geminiToolPattern = /(?:```(?:tool_code\s+)?|\btool_code\s+)?([a-zA-Z0-9_]+)\s*\(\s*(?:location|query|expression)=(?:"|')([^"']+)(?:"|')\s*\)/gi;
+      let geminiMatch;
+      
+      while ((geminiMatch = geminiToolPattern.exec(content)) !== null) {
+        const toolName = geminiMatch[1].trim();
+        const paramValue = geminiMatch[2].trim();
+        
+        // Extract parameter name based on common tools
+        let paramName = "query"; // Default
+        if (toolName.includes("weather")) {
+          paramName = "location";
+        } else if (toolName.includes("calculate")) {
+          paramName = "expression";
+        }
+        
+        // Find the server that has this tool
+        const serverWithTool = servers.find(server => 
+          server.tools.some(tool => tool.name === toolName || 
+                                   tool.name === `get_${toolName}`)
+        );
+        
+        if (serverWithTool) {
+          // Find the exact tool
+          const exactToolName = serverWithTool.tools.find(t => 
+            t.name === toolName || t.name === `get_${toolName}`
+          )?.name || toolName;
+          
+          // Add the tool call
+          toolCalls.push({
+            id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+            tool: exactToolName,
+            args: { [paramName]: paramValue },
+            status: 'pending'
+          });
+        }
+      }
+      
+      // Check for tool call indicators in the message content with Using tool: format
       const toolCallPattern = /Using tool:?\s+([a-zA-Z0-9_]+)\(([^)]*)\)/gi;
       let match;
       
@@ -160,8 +201,69 @@ export function EnhancedMCPClientUpdated() {
       }
     }
     
-    // Handle special patterns (weather, calculator, etc.) as before
-    // Simplified for brevity - we'll focus on the UI improvements
+    // Weather pattern - as fallback for any weather related queries
+    if (toolCalls.length === 0 && 
+        content.toLowerCase().includes('weather') && 
+        servers.some(server => server.tools.some(tool => 
+          tool.name.includes('weather') || tool.name.includes('get_weather')
+        ))) {
+      
+      const weatherServer = servers.find(server => 
+        server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+      );
+      
+      if (weatherServer) {
+        const weatherTool = weatherServer.tools.find(tool => 
+          tool.name.includes('weather') || tool.name.includes('get_weather')
+        );
+        
+        if (weatherTool) {
+          // Extract location from content using proper patterns
+          const locationPatterns = [
+            /weather\s+(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)/i,
+            /(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)(?:\s+weather)/i,
+            /what(?:'s|\s+is)\s+(?:the\s+)?weather\s+(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)/i,
+            /([a-zA-Z0-9\s,\-\.]+)\s+weather/i
+          ];
+          
+          let location = "";
+          
+          // Try each pattern until we find a match
+          for (const pattern of locationPatterns) {
+            const match = content.match(pattern);
+            if (match && match[1]) {
+              location = match[1].trim();
+              break;
+            }
+          }
+          
+          // If no location found, try to extract it from the user query in content
+          if (!location) {
+            const userQueryMatch = content.match(/User message:?\s+(.+?)(?:\.|$)/i);
+            if (userQueryMatch && userQueryMatch[1]) {
+              // Extract location from user query
+              for (const pattern of locationPatterns) {
+                const match = userQueryMatch[1].match(pattern);
+                if (match && match[1]) {
+                  location = match[1].trim();
+                  break;
+                }
+              }
+            }
+          }
+          
+          // If we have a location, create a tool call
+          if (location) {
+            toolCalls.push({
+              id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+              tool: weatherTool.name,
+              args: { location },
+              status: 'pending'
+            });
+          }
+        }
+      }
+    }
     
     return toolCalls;
   };
@@ -229,30 +331,132 @@ IMPORTANT: After using a tool once, just respond to the information without maki
         const userInstruction: ChatMessage = {
           id: `gemini-context-${Date.now()}`,
           role: 'user',
-          content: `You are a helpful assistant that can have natural conversations with users. You can also use tools when appropriate, but you don't need to use tools for every response.
+          content: `You are a helpful assistant that can have natural conversations with users. You can use tools when appropriate to get information needed to answer questions.
 
 Available tools: ${installedServers.map(server => 
             server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
           ).join('. ')}
 
-IMPORTANT: After using a tool once, just respond to the information without making additional tool calls. Wait for the user to ask another question before using tools again.
+When you need to use a tool, format it like this:
+<mcp:tool_call>
+{
+  "jsonrpc": "2.0",
+  "id": "unique-id",
+  "method": "execute_tool",
+  "params": {
+    "name": "tool_name",
+    "parameters": {
+      "param1": "value1"
+    }
+  }
+}
+</mcp:tool_call>
 
-If I ask about weather, you can use the weather tool. Otherwise, just have a normal conversation.
+IMPORTANT: If you can't format exactly like above, you can use: get_weather(location="city_name") 
+
+For example: To check the weather in Seattle, you could use:
+get_weather(location="Seattle")
+
+CRITICALLY IMPORTANT INSTRUCTIONS:
+1. Make only ONE tool call per response
+2. After making a tool call, STOP your response and wait for the result
+3. DO NOT make additional tool calls while waiting for results
+4. DO NOT repeat or duplicate tool calls
+5. After receiving tool results, respond normally to the user without making new tool calls
+6. Wait for the user to ask another question before using tools again
 
 User message: ${userMessage.content}`,
           createdAt: new Date().toISOString()
         };
         
         response = await callGeminiAPI([userInstruction], selectedModel);
+      } else if (selectedModel.includes('claude')) {
+        response = await callAnthropicAPI([...messages, systemMessage, userMessage], selectedModel);
       } else {
-        response = await callOpenRouterAPI([...messages, systemMessage, userMessage], selectedModel);
+        // Create a simple instruction for other models as fallback
+        const fallbackInstruction: ChatMessage = {
+          id: `fallback-${Date.now()}`,
+          role: 'user' as const,
+          content: `${systemMessage.content}\n\nUser: ${userMessage.content}`,
+          createdAt: new Date().toISOString()
+        };
+        response = await callGeminiAPI([fallbackInstruction], selectedModel);
       }
       
       if (response.success && response.message) {
-        let assistantMessage = response.message as ChatMessage;
+        const assistantMessage = response.message as ChatMessage;
         
         // Save the original message content before processing tool calls
-        const originalContent = assistantMessage.content;
+        const originalContent = assistantMessage.content || '';
+        
+        // Handle empty responses from Gemini 2.5 Pro
+        if (!originalContent.trim()) {
+          console.log("Empty response received from Gemini, attempting to recover");
+          // Add a placeholder message
+          setMessages(prev => [...prev, {
+            id: `assistant-${Date.now()}`,
+            role: 'assistant',
+            content: "I'll help you with that. Let me check for you...",
+            createdAt: new Date().toISOString()
+          }]);
+
+          // For weather queries, try direct detection
+          if (userMessage.content.toLowerCase().includes('weather')) {
+            // Extract location from the user message
+            const locationPatterns = [
+              /weather\s+(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)/i,
+              /(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)(?:\s+weather)/i,
+              /what(?:'s|\s+is)\s+(?:the\s+)?weather\s+(?:in|for|at)\s+([a-zA-Z0-9\s,\-\.]+)/i,
+              /([a-zA-Z0-9\s,\-\.]+)\s+weather/i
+            ];
+            
+            let location = "";
+            for (const pattern of locationPatterns) {
+              const match = userMessage.content.match(pattern);
+              if (match && match[1]) {
+                location = match[1].trim();
+                break;
+              }
+            }
+            
+            if (location) {
+              const weatherServer = installedServers.find(server => 
+                server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+              );
+              
+              if (weatherServer) {
+                const weatherTool = weatherServer.tools.find(tool => 
+                  tool.name.includes('weather') || tool.name.includes('get_weather')
+                );
+                
+                if (weatherTool) {
+                  const toolCall: ToolCall = {
+                    id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                    tool: weatherTool.name,
+                    args: { location },
+                    status: 'pending'
+                  };
+                  
+                  try {
+                    // Process the weather tool call directly
+                    await processToolCall(
+                      toolCall, 
+                      installedServers,
+                      setActiveToolCalls,
+                      (message) => setMessages(prev => [...prev, message]),
+                      async (toolCall, result) => {
+                        await generateFollowUpResponse(toolCall, result);
+                      }
+                    );
+                  } catch (error) {
+                    console.error("Error processing emergency tool call:", error);
+                  }
+                }
+              }
+            }
+          }
+          return; // Skip further processing
+        }
         
         // Check for tool calls in the assistant message
         const toolCalls = detectToolCalls(originalContent, installedServers);
@@ -354,8 +558,11 @@ User message: ${userMessage.content}`,
       let response;
       if (selectedModel.startsWith('gemini')) {
         response = await callGeminiAPI(followUpMessages, selectedModel);
+      } else if (selectedModel.includes('claude')) {
+        response = await callAnthropicAPI(followUpMessages, selectedModel);
       } else {
-        response = await callOpenRouterAPI(followUpMessages, selectedModel);
+        // Fallback to Gemini
+        response = await callGeminiAPI(followUpMessages, selectedModel);
       }
       
       console.log('LLM follow-up response received:', response);
@@ -425,6 +632,187 @@ User message: ${userMessage.content}`,
       return newInstalledServers;
     });
   };
+  
+  const handleConfigFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    // Check file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      const errorMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: "File is too large. Maximum size is 10MB.",
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
+    
+    setConfigProcessing(true);
+    
+    try {
+      // Read the file
+      const fileContent = await file.text();
+      
+      // Parse the JSON content
+      const serverConfig = JSON.parse(fileContent);
+      
+      // Validate that the JSON has the required MCP server structure
+      if (!validateMCPServerConfig(serverConfig)) {
+        const errorMessage: ChatMessage = {
+          id: `system-${Date.now()}`,
+          content: "Invalid MCP server configuration. Please check the file format.",
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, errorMessage]);
+        setConfigProcessing(false);
+        return;
+      }
+      
+      // Create a proper MCPServer object
+      const now = new Date().toISOString();
+      const server: MCPServer = {
+        id: serverConfig.id || `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        name: serverConfig.name || "Imported Server",
+        description: serverConfig.description || "Imported from configuration file",
+        ownerId: userSession?.user?.id || 'anonymous',
+        createdAt: serverConfig.created_at || now,
+        updatedAt: serverConfig.updated_at || now,
+        isPublic: serverConfig.is_public || false,
+        expiresAt: serverConfig.expires_at,
+        tools: serverConfig.tools?.map((tool: any) => ({
+          id: tool.id || `tool-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          name: tool.name,
+          description: tool.description || `Tool for ${tool.name}`,
+          parameters: tool.parameters || [],
+          serverId: serverConfig.id,
+          createdAt: tool.created_at || now,
+          updatedAt: tool.updated_at || now
+        })) || [],
+        resources: serverConfig.resources || [],
+        prompts: serverConfig.prompts || [],
+        schemaVersion: serverConfig.schema_version || "2025-03-26",
+        transportTypes: serverConfig.transport_types || ["sse", "stdio"],
+        capabilities: serverConfig.capabilities || {
+          tools: (serverConfig.tools?.length || 0) > 0,
+          resources: (serverConfig.resources?.length || 0) > 0,
+          prompts: (serverConfig.prompts?.length || 0) > 0,
+          sampling: false
+        }
+      };
+      
+      // Add the server to installed servers
+      handleInstallServer(server);
+      
+      // Reset the file input
+      event.target.value = "";
+      
+      // Add success message
+      const successMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: `Successfully imported MCP server "${server.name}" with ${server.tools.length} tools.`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, successMessage]);
+      
+    } catch (error) {
+      console.error("Error processing config file:", error);
+      const errorMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: `Error processing config file: ${error instanceof Error ? error.message : String(error)}`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setConfigProcessing(false);
+    }
+  };
+  
+  const validateMCPServerConfig = (config: any): boolean => {
+    // Basic validation to ensure it's a valid MCP server configuration
+    if (!config) return false;
+    
+    // Check for essential properties
+    if (!config.name) return false;
+    
+    // Check for tools array
+    if (config.tools && !Array.isArray(config.tools)) return false;
+    
+    // Validate tools if they exist
+    if (config.tools && Array.isArray(config.tools)) {
+      for (const tool of config.tools) {
+        if (!tool.name) return false;
+      }
+    }
+    
+    return true;
+  };
+  
+  const handleServerUrlAdd = async () => {
+    if (!serverUrl) return;
+    
+    try {
+      // Validate URL format
+      let url = serverUrl.trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        url = `https://${url}`;
+      }
+      
+      const validUrl = new URL(url);
+      
+      // Create a server object from the URL
+      const serverId = validUrl.pathname.split('/').pop() || `url-${Date.now()}`;
+      const server: MCPServer = {
+        id: serverId,
+        name: `Server at ${validUrl.hostname}`,
+        description: `MCP Server at ${url}`,
+        ownerId: userSession?.user?.id || 'anonymous',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPublic: false,
+        tools: [],
+        resources: [],
+        prompts: [],
+        schemaVersion: "2025-03-26",
+        transportTypes: ["sse", "stdio"],
+        capabilities: {
+          tools: true,
+          resources: false,
+          prompts: false,
+          sampling: false
+        }
+      };
+      
+      // Add the server to installed servers
+      handleInstallServer(server);
+      
+      // Reset the URL input
+      setServerUrl("");
+      
+      // Add success message
+      const successMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: `Successfully added MCP server at ${url}`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, successMessage]);
+      
+    } catch (error) {
+      console.error("Error adding server URL:", error);
+      const errorMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: "Invalid URL format. Please enter a valid URL.",
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
 
   return (
     <div className="container mx-auto py-6">
@@ -487,26 +875,87 @@ User message: ${userMessage.content}`,
                   <DialogHeader>
                     <DialogTitle>Add MCP Server</DialogTitle>
                     <DialogDescription>
-                      Select a server to add to your MCP Client
+                      Add a server to your MCP Client
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="py-4">
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                      {availableServers.map(server => (
-                        <div 
-                          key={server.id} 
-                          className="flex justify-between items-center border rounded-lg p-3 hover:bg-muted/50 cursor-pointer"
-                          onClick={() => handleInstallServer(server)}
-                        >
-                          <div>
-                            <div className="font-medium">{server.name}</div>
-                            <div className="text-sm text-muted-foreground">{server.description}</div>
+                  
+                  <Tabs defaultValue="marketplace" className="w-full">
+                    <TabsList className="grid grid-cols-3 mb-4">
+                      <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
+                      <TabsTrigger value="config">Config File</TabsTrigger>
+                      <TabsTrigger value="url">URL</TabsTrigger>
+                    </TabsList>
+                    
+                    <TabsContent value="marketplace" className="py-2">
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {availableServers.map(server => (
+                          <div 
+                            key={server.id} 
+                            className="flex justify-between items-center border rounded-lg p-3 hover:bg-muted/50 cursor-pointer"
+                            onClick={() => handleInstallServer(server)}
+                          >
+                            <div>
+                              <div className="font-medium">{server.name}</div>
+                              <div className="text-sm text-muted-foreground">{server.description}</div>
+                            </div>
+                            <Button size="sm">Install</Button>
                           </div>
-                          <Button size="sm">Install</Button>
+                        ))}
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="config" className="py-2">
+                      <div className="space-y-4">
+                        <div className="text-sm text-muted-foreground mb-2">
+                          Upload an MCP configuration file (mcp_config.json)
                         </div>
-                      ))}
-                    </div>
-                  </div>
+                        
+                        <div className="flex items-center justify-center w-full">
+                          <label htmlFor="mcp-config-upload" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-muted/30 hover:bg-muted/50">
+                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                              <svg className="w-8 h-8 mb-3 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                              </svg>
+                              <p className="mb-2 text-sm text-muted-foreground">Click to upload or drag and drop</p>
+                              <p className="text-xs text-muted-foreground">JSON file (max 10MB)</p>
+                            </div>
+                            <input 
+                              id="mcp-config-upload" 
+                              type="file" 
+                              accept=".json" 
+                              className="hidden" 
+                              onChange={handleConfigFileUpload}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </TabsContent>
+                    
+                    <TabsContent value="url" className="py-2">
+                      <div className="space-y-4">
+                        <div className="text-sm text-muted-foreground mb-2">
+                          Enter the URL of an MCP server to add
+                        </div>
+                        
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="https://example.com/api/mcp/server-id"
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            value={serverUrl}
+                            onChange={(e) => setServerUrl(e.target.value)}
+                          />
+                          <Button 
+                            onClick={handleServerUrlAdd} 
+                            disabled={!serverUrl}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                  
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setShowServerDialog(false)}>Cancel</Button>
                   </DialogFooter>
@@ -526,7 +975,7 @@ User message: ${userMessage.content}`,
               <Tabs defaultValue="gemini" className="w-full">
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="gemini">Gemini</TabsTrigger>
-                  <TabsTrigger value="openrouter">OpenRouter</TabsTrigger>
+                  <TabsTrigger value="anthropic">Anthropic</TabsTrigger>
                 </TabsList>
                 <TabsContent value="gemini" className="space-y-2 mt-2">
                   <Button 
@@ -550,25 +999,35 @@ User message: ${userMessage.content}`,
                     </div>
                   </Button>
                 </TabsContent>
-                <TabsContent value="openrouter" className="space-y-2 mt-2">
+                <TabsContent value="anthropic" className="space-y-2 mt-2">
                   <Button 
-                    variant={selectedModel === "openai/gpt-4o" ? "default" : "outline"} 
+                    variant={selectedModel === "claude-3-7-sonnet-20250219" ? "default" : "outline"} 
                     className="w-full justify-start"
-                    onClick={() => setSelectedModel("openai/gpt-4o")}
+                    onClick={() => setSelectedModel("claude-3-7-sonnet-20250219")}
                   >
                     <div className="text-left">
-                      <div className="font-medium">GPT-4o</div>
-                      <div className="text-xs text-muted-foreground">Via OpenRouter</div>
+                      <div className="font-medium">Claude 3.7 Sonnet</div>
+                      <div className="text-xs text-muted-foreground">Best for tool usage</div>
                     </div>
                   </Button>
                   <Button 
-                    variant={selectedModel === "anthropic/claude-3-7-sonnet-20250219" ? "default" : "outline"}
+                    variant={selectedModel === "claude-3-5-sonnet-20241022" ? "default" : "outline"}
                     className="w-full justify-start"
-                    onClick={() => setSelectedModel("anthropic/claude-3-7-sonnet-20250219")}
+                    onClick={() => setSelectedModel("claude-3-5-sonnet-20241022")}
                   >
                     <div className="text-left">
-                      <div className="font-medium">Claude 3 Opus</div>
-                      <div className="text-xs text-muted-foreground">Via OpenRouter</div>
+                      <div className="font-medium">Claude 3.5 Sonnet</div>
+                      <div className="text-xs text-muted-foreground">Most powerful Claude model</div>
+                    </div>
+                  </Button>
+                  <Button 
+                    variant={selectedModel === "claude-3-5-haiku-20241022" ? "default" : "outline"}
+                    className="w-full justify-start"
+                    onClick={() => setSelectedModel("claude-3-5-haiku-20241022")}
+                  >
+                    <div className="text-left">
+                      <div className="font-medium">Claude 3.5 Haiku</div>
+                      <div className="text-xs text-muted-foreground">Fastest Claude model</div>
                     </div>
                   </Button>
                 </TabsContent>

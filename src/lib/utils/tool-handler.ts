@@ -20,7 +20,8 @@ export async function processToolCall(
   servers: MCPServer[],
   updateActiveToolCalls: (callback: (prev: ToolCall[]) => ToolCall[]) => void,
   addMessageToConversation: (message: ChatMessage) => void,
-  generateFollowUpResponse: (toolCall: ToolCall, result: any) => Promise<void>
+  generateFollowUpResponse: (toolCall: ToolCall, result: any, modelType: string) => Promise<void>,
+  modelType: string = ""
 ) {
   try {
     console.log(`Processing tool call: ${toolCall.tool}`, toolCall);
@@ -53,7 +54,7 @@ export async function processToolCall(
       addMessageToConversation(toolMessage);
       
       // Generate a follow-up response for cached results with no-tool-call instruction
-      await generateFollowUpResponse(toolCall, cachedResult);
+      await generateFollowUpResponse(toolCall, cachedResult, modelType);
       
       return cachedResult;
     }
@@ -104,7 +105,7 @@ export async function processToolCall(
     addMessageToConversation(toolMessage);
     
     // Generate a follow-up response but instruct not to use more tools
-    await generateFollowUpResponse(toolCall, result);
+    await generateFollowUpResponse(toolCall, result, modelType);
     
     return result;
   } catch (error) {
@@ -130,7 +131,7 @@ export async function processToolCall(
     try {
       await generateFollowUpResponse(toolCall, {
         error: error instanceof Error ? error.message : String(error)
-      });
+      }, modelType);
     } catch (followUpError) {
       console.error('Error generating follow-up for error:', followUpError);
     }
@@ -148,16 +149,41 @@ export function createFollowUpPrompt(
   result: any, 
   modelType: string
 ): ChatMessage {
-  if (modelType.startsWith('gemini')) {
-    // For Gemini, we create a user message with explicit instructions
+  // Format the result consistently
+  const formattedResult = typeof result === 'string' 
+    ? result 
+    : JSON.stringify(result, null, 2);
+    
+  // Handle Anthropic models (Claude) - they need special handling
+  if (modelType.includes('anthropic') || modelType.includes('claude')) {
+    // For Anthropic, we use user role instead of system and give explicit instructions
+    return {
+      id: `user-followup-${Date.now()}`,
+      role: 'user',
+      content: `I used the ${toolCall.tool} tool and got this result:\n\n${formattedResult}\n\n` +
+              `Please analyze this information and provide a helpful, conversational response in plain text. ` +
+              `Include relevant details from the result in your explanation.\n\n` +
+              `IMPORTANT: DO NOT format your response as a tool call. DO NOT use XML tags or code blocks. ` +
+              `DO NOT include any functions like get_weather() or tool calls in your response. ` +
+              `Just respond in natural language.`,
+      createdAt: new Date().toISOString()
+    };
+  } else if (modelType.startsWith('gemini')) {
+    // For Gemini Flash, we need extremely explicit instructions to avoid tool chaining
+    if (modelType.includes('flash')) {
+      return {
+        id: `followup-${Date.now()}`,
+        role: 'user',
+        content: `Here are the results from the ${toolCall.tool} tool: ${formattedResult}\n\nYou MUST only give a simple, direct response to this information in a conversational way. You will respond as normal, not as a tool call. Once you give your response, unless follow-up is required, you will wait until the user prompts you again.\n\n`,
+        createdAt: new Date().toISOString()
+      };
+    }
+    
+    // For other Gemini models
     return {
       id: `followup-${Date.now()}`,
       role: 'user',
-      content: `Here are the results from the ${toolCall.tool} tool: ${JSON.stringify(result, null, 2)}
-
-Please respond to this information in a natural, conversational way. Include specific details from the results but present them in a friendly, human-like manner. Do not just repeat the raw data or use phrases like "the tool returned" or "according to the data."
-
-IMPORTANT: Do not make any additional tool calls in your response. Just respond conversationally to the information provided.`,
+      content: `Here are the results from the ${toolCall.tool} tool: ${formattedResult}\n\nYou MUST only give a simple, direct response to this information in a conversational way. You will respond as normal, not as a tool call. Once you give your response, unless follow-up is required, you will wait until the user prompts you again.\n\n`,
       createdAt: new Date().toISOString()
     };
   } else {
@@ -165,11 +191,7 @@ IMPORTANT: Do not make any additional tool calls in your response. Just respond 
     return {
       id: `system-${Date.now()}`,
       role: 'system',
-      content: `A tool call to "${toolCall.tool}" has just completed with the following result: ${JSON.stringify(result, null, 2)}
-
-Respond conversationally to this information. Include specific details from the result (like temperatures, values, etc). Your response should be in natural language without structured formats. Don't say things like "the tool returned" or "according to the data" - just present the information naturally as if you're having a conversation.
-
-IMPORTANT: Do not make any additional tool calls in your response. Just respond conversationally to the information provided.`,
+      content: `A tool call to "${toolCall.tool}" has just completed with the following result: ${formattedResult}\n\nRespond conversationally to this information. Include specific details from the result (like temperatures, values, etc). Your response should be in natural language without structured formats. Don't say things like "the tool returned" or "according to the data" - just present the information naturally as if you're having a conversation.\n\nIMPORTANT: Do not make any additional tool calls in your response. Just respond conversationally to the information provided.`,
       createdAt: new Date().toISOString()
     };
   }
