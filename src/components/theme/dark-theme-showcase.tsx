@@ -75,7 +75,7 @@ export function DarkThemeShowcase() {
               
               <div className="p-4 border rounded-lg bg-primary/5">
                 <div className="text-sm mb-2">Gradient text:</div>
-                <h2 className="text-xl font-bold gradient-text">MCPify.ai</h2>
+                <h2 className="text-xl font-bold gradient-text">MC-TO-THE-P</h2>
               </div>
             </div>
           </div>

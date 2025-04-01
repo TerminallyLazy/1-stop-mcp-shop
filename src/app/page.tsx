@@ -31,7 +31,7 @@ export default function Home() {
               <div className="flex items-center justify-center">
                 <div className="relative h-[350px] w-full overflow-hidden rounded-xl border bg-gradient-to-b from-primary/20 to-background p-4">
                   <div className="absolute inset-0 flex items-center justify-center text-lg font-medium">
-                    Interactive Demo Placeholder
+                  
                   </div>
                 </div>
               </div>
@@ -125,7 +125,7 @@ export default function Home() {
         </section>
       </main>
       <footer className="flex flex-col gap-2 sm:flex-row py-6 w-full border-t items-center justify-center px-4 md:px-6">
-        <p className="text-xs text-muted-foreground">© 2025 MCPify. All rights reserved.</p>
+        <p className="text-xs text-muted-foreground">© 2025 Emcee-PRO. All rights reserved.</p>
       </footer>
     </div>
   );

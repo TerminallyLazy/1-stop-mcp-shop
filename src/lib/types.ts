@@ -9,6 +9,16 @@ export interface MCPServer {
   isPublic: boolean;
   expiresAt?: string; // For non-premium users
   tools: MCPTool[];
+  resources?: MCPResource[];
+  prompts?: MCPPrompt[];
+  schemaVersion?: string;
+  transportTypes?: string[];
+  capabilities?: {
+    tools: boolean;
+    resources: boolean;
+    prompts: boolean;
+    sampling: boolean;
+  };
 }
 
 export interface MCPTool {
@@ -28,6 +38,27 @@ export interface MCPToolParameter {
   required: boolean;
   enum?: string[];
   default?: any;
+}
+
+export interface MCPResource {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  content: string;
+  serverId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MCPPrompt {
+  id: string;
+  name: string;
+  description: string;
+  template: string;
+  serverId: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // User types
@@ -74,8 +105,9 @@ export interface ToolCall {
   id: string;
   tool: string;
   args: Record<string, any>;
-  status: 'pending' | 'success' | 'error';
+  status: 'pending' | 'success' | 'error' | 'in_progress';
   result?: string;
+  requestKey?: string; // Used for deduplication of identical tool calls
 }
 
 export interface Chat {

@@ -38,7 +38,7 @@ export function Navbar() {
         <div className="mr-4 flex">
           <Link href="/" className="mr-6 flex items-center space-x-2">
             <span className="font-bold text-xl bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
-              MCPify
+              Emcee-PRO
             </span>
           </Link>
           <nav className="flex items-center space-x-6 text-sm font-medium">
@@ -69,7 +69,7 @@ export function Navbar() {
           </nav>
         </div>
         <div className="flex flex-1 items-center justify-end space-x-2">
-          <div className="flex items-center">
+          <div className="flex items-center space-x-4">
             <ThemeToggle />
             {!loading && session?.user ? (
               <DropdownMenu>

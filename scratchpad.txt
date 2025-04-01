@@ -1,0 +1,60 @@
+# MCP Server CORS Issue Debugging
+
+## Problem
+- Encountered CORS error when attempting to build an MCP server
+- Error occurs when making direct browser fetch to Gemini API
+- Error message: "Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at https://generativelanguage.googleapis.com/v1beta/models/models/gemini/2.5-pro-exp-03-25:generateContent"
+
+## First Solution Attempt (CORS Proxy)
+1. Created a server-side API proxy route:
+   - Added new route at `/src/app/api/gemini/route.ts`
+   - This route forwards requests to Gemini API from the server side, avoiding CORS restrictions
+
+2. Modified the client-side code:
+   - Updated `generateMCPTools` function in `/src/lib/api/mcp.ts` to use our proxy endpoint
+   - Instead of calling Gemini API directly, it now calls our `/api/gemini` endpoint
+
+## New Errors
+- After implementing the proxy, received a 404 error:
+  - "Error: Failed to generate tools: 404 - "
+  - The issue was with URL construction in the proxy
+  - First fixed by properly formatting the model name
+
+## Improved Solution
+1. Enhanced the proxy implementation:
+   - Fixed URL construction to properly handle different model name formats
+   - Added detailed logging for better debugging
+   - Improved error handling with proper status codes
+   - Added validation for required parameters
+
+2. Updated client-side code:
+   - Improved error handling and logging
+   - Fixed type errors in the code
+   - Streamlined the API request process
+
+3. Key fixes:
+   - The URL structure needed to include "models/" prefix correctly
+   - Fixed how we parse "gemini-2.5-pro-exp-03-25" to "models/gemini/2.5-pro-exp-03-25"
+   - Added more detailed error messages to help with debugging
+   - Fixed syntax errors caused by our changes
+   - Solved type issues with proper TypeScript type annotations
+
+## Implementation Details
+- Next.js API route handles the actual Gemini API call server-side
+- Client sends the same parameters but to our local API endpoint
+- Credentials and API keys are handled server-side, improving security
+- Added more robust error handling throughout the process
+- Enhanced logging to track request/response flow
+
+## Common Issues to Check
+- Make sure the API key is correctly set in environment variables
+- Verify the server is running when testing the API call
+- Check browser console for detailed error messages
+- Make sure the model name format is correct when making requests
+
+## Future Improvements
+- Consider adding rate limiting to prevent abuse
+- Add caching to reduce duplicate requests
+- Implement better error handling and user feedback
+- Add detailed logging for errors
+- Add unit tests to verify API calls work correctly
