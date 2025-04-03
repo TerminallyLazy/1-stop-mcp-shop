@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChatInterface } from './chat-interface';
 import { MCP_ToolsPanel } from './tools-panel';
-import { ChatMessage, MCPTool } from '@/lib/types';
+import { ChatMessage, MCPTool } from '../../lib/types';
 
 interface ChatBuilderProps {
   onToolsGenerated?: (tools: MCPTool[], description: string) => void;
@@ -33,7 +33,7 @@ export function ChatBuilder({ onToolsGenerated }: ChatBuilderProps) {
     
     try {
       // Import the necessary API functions
-      const { generateMCPTools, createDefaultTools } = await import('@/lib/api/mcp');
+      const { generateMCPTools, createDefaultTools } = await import('../../lib/api/mcp');
       
       // Generate tools using the API or fall back to defaults
       let tools: MCPTool[];
@@ -58,7 +58,7 @@ export function ChatBuilder({ onToolsGenerated }: ChatBuilderProps) {
       setServerDescription(description);
       
       // Now generate an assistant response
-      const { callGeminiAPI } = await import('@/lib/api/gemini');
+      const { callGeminiAPI } = await import('../../lib/api/gemini');
       
       // Create system prompt for Gemini
       const systemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers based on user requirements. The user has requested an MCP server with the following description: "${query}".
@@ -135,7 +135,7 @@ I'll help customize these tools and prepare everything for deployment. Feel free
     try {
       // Create context from the current tools
       const toolsContext = generatedTools.map(tool => 
-        `Tool: ${tool.name}\nDescription: ${tool.description}\nParameters: ${tool.parameters.map(p => 
+        `Tool: ${tool.name}\nDescription: ${tool.description}\nParameters: ${tool.parameters.map((p: { name: any; type: any; required: any; }) => 
           `${p.name} (${p.type})${p.required ? ' [required]' : ''}`).join(', ')}`
       ).join('\n\n');
       
@@ -164,13 +164,13 @@ Respond conversationally to the user, helping them refine their MCP server. Focu
       ];
       
       // Call the Gemini API
-      const { callGeminiAPI } = await import('@/lib/api/gemini');
+      const { callGeminiAPI } = await import('../../lib/api/gemini');
       const response = await callGeminiAPI({
-        model: 'gemini-2.5-pro-exp-03-25',
+        model: 'gemini-2.0-flash',
         messages: formattedMessages,
       });
       
-      const responseContent = response?.content || "I'm sorry, I couldn't generate a response. Let's continue building your MCP server.";
+      const responseContent = response?.message?.content || "I'm sorry, I couldn't generate a response. Let's continue building your MCP server.";
       
       // Add assistant response
       const assistantMessage: ChatMessage = {
@@ -248,17 +248,23 @@ Respond conversationally to the user, helping them refine their MCP server. Focu
       <div className="h-full">
         <ChatInterface 
           messages={chatMessages}
-          onSendMessage={handleSendMessage}
-          onInitialSubmit={handleInitialSubmit}
-          isGenerating={isGenerating}
+          onSendMessage={initialMode ? handleInitialSubmit : handleSendMessage}
+          isLoading={isGenerating}
+          initialPrompt={initialMode ? "Describe the MCP server you want to build..." : undefined}
           initialMode={initialMode}
         />
       </div>
-      <div className="h-full bg-background">
+      <div className="h-full overflow-hidden">
         <MCP_ToolsPanel 
-          tools={generatedTools}
-          serverName={serverName}
+          tools={generatedTools} 
+          serverName={serverName} 
           serverDescription={serverDescription}
+          onDeploy={() => {
+            // Pass the generated tools to the parent component for deployment
+            if (onToolsGenerated && generatedTools.length > 0) {
+              onToolsGenerated(generatedTools, serverDescription || "");
+            }
+          }}
         />
       </div>
     </div>

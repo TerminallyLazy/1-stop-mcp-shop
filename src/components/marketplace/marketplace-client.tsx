@@ -1,15 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { MCPServer } from "@/lib/types";
-import { listMCPServers } from "@/lib/api/mcp";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { MCPServer } from "../../lib/types";
+import { listMCPServers } from "../../lib/api/mcp";
+
+// Use the same storage key as the client page
+const MCP_SERVERS_STORAGE_KEY = 'mcp-installed-servers';
 
 export function MarketplaceClient() {
   const [servers, setServers] = useState<MCPServer[]>([]);
+  const [installedServers, setInstalledServers] = useState<MCPServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedServer, setSelectedServer] = useState<MCPServer | null>(null);
@@ -29,6 +33,12 @@ export function MarketplaceClient() {
       try {
         const serverList = await listMCPServers();
         setServers(serverList);
+
+        // Load installed servers from localStorage
+        const storedServers = localStorage.getItem(MCP_SERVERS_STORAGE_KEY);
+        if (storedServers) {
+          setInstalledServers(JSON.parse(storedServers));
+        }
       } catch (error) {
         console.error("Error fetching servers:", error);
       } finally {
@@ -45,9 +55,32 @@ export function MarketplaceClient() {
   };
 
   const confirmInstall = () => {
-    // In a real implementation, this would add the server to the user's installed servers
-    console.log(`Installing server: ${selectedServer?.name}`);
+    if (!selectedServer) return;
+    
+    // Add the server to installed servers
+    const updatedInstalledServers = [...installedServers];
+    
+    // Check if server is already installed
+    const existingIndex = updatedInstalledServers.findIndex(s => s.id === selectedServer.id);
+    
+    if (existingIndex >= 0) {
+      // If already installed, just close the dialog
+      setShowInstallDialog(false);
+      return;
+    }
+    
+    // Add the server
+    updatedInstalledServers.push(selectedServer);
+    
+    // Update state and localStorage
+    setInstalledServers(updatedInstalledServers);
+    localStorage.setItem(MCP_SERVERS_STORAGE_KEY, JSON.stringify(updatedInstalledServers));
+    
     setShowInstallDialog(false);
+  };
+
+  const isServerInstalled = (serverId: string) => {
+    return installedServers.some(server => server.id === serverId);
   };
 
   const filteredServers = servers.filter(server => {
@@ -165,11 +198,16 @@ export function MarketplaceClient() {
                         <span className="font-medium">Tools:</span> {server.tools.length}
                       </div>
                       <div className="mt-4 space-y-2">
-                        {server.tools.map((tool) => (
+                        {server.tools.slice(0, 3).map((tool) => (
                           <div key={tool.id} className="text-sm border-l-2 border-primary/50 pl-2">
                             {tool.name}
                           </div>
                         ))}
+                        {server.tools.length > 3 && (
+                          <div className="text-sm text-muted-foreground">
+                            +{server.tools.length - 3} more tools
+                          </div>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -177,8 +215,10 @@ export function MarketplaceClient() {
                     <Button 
                       className="w-full"
                       onClick={() => handleInstall(server)}
+                      variant={isServerInstalled(server.id) ? "outline" : "default"}
+                      disabled={isServerInstalled(server.id)}
                     >
-                      Install Server
+                      {isServerInstalled(server.id) ? "Installed" : "Install Server"}
                     </Button>
                   </CardFooter>
                 </Card>

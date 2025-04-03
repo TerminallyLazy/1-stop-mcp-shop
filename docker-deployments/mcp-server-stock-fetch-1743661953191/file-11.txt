@@ -1,0 +1,12 @@
+## Available Tools
+
+- **get_stock_price**: Fetches the latest stock price for a given stock ticker symbol from a reliable financial data API.
+- **validate_ticker_symbol**: Validates whether a given ticker symbol is a valid and recognized stock ticker.
+
+## Environment Variables
+
+See .env.example for required environment variables.
+
+## License
+
+MIT

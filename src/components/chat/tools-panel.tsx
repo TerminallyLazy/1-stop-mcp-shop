@@ -1,19 +1,20 @@
 "use client";
 
 import React, { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { MCPTool } from "@/lib/types";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { MCPTool } from "../../lib/types";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../components/ui/collapsible";
 
 interface ToolsPanelProps {
   tools: MCPTool[];
   serverName?: string;
   serverDescription?: string;
+  onDeploy?: () => void;
 }
 
-export function MCP_ToolsPanel({ tools, serverName, serverDescription }: ToolsPanelProps) {
+export function MCP_ToolsPanel({ tools, serverName, serverDescription, onDeploy }: ToolsPanelProps) {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   
   const toggleTool = (toolId: string) => {
@@ -132,8 +133,8 @@ export function MCP_ToolsPanel({ tools, serverName, serverDescription }: ToolsPa
                       <div className="mt-4">
                         <h4 className="text-sm font-medium mb-2">Parameters:</h4>
                         <ul className="space-y-2">
-                          {tool.parameters.map((param) => (
-                            <li key={param.name} className="text-sm bg-muted/50 p-2 rounded">
+                          {tool.parameters.map((param: { name: string; type: string; required: boolean; description: string; }) => (
+                            <li key={String(param.name)} className="text-sm bg-muted/50 p-2 rounded">
                               <div className="flex items-center justify-between">
                                 <div className="font-mono">{param.name}</div>
                                 <div className="flex items-center gap-1">
@@ -174,6 +175,7 @@ export function MCP_ToolsPanel({ tools, serverName, serverDescription }: ToolsPa
           <CardFooter>
             <Button 
               className="w-full bg-green-600 hover:bg-green-700" 
+              onClick={onDeploy}
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2">
                 <path d="M12 5v14" />

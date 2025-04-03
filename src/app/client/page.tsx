@@ -1,5 +1,5 @@
-import { Navbar } from "@/components/layout/navbar";
-import { EnhancedMCPClientUpdated } from "@/components/client/enhanced-mcp-client-updated";
+import { Navbar } from "../../components/layout/navbar";
+import { EnhancedMCPClientUpdated } from "../../components/client/enhanced-mcp-client-updated";
 
 export default function ClientPage() {
   return (

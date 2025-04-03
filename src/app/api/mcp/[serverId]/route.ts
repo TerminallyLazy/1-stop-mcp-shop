@@ -1,7 +1,7 @@
 // src/app/api/mcp/[serverId]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import { MCPTool } from '@/lib/types';
+import { supabase } from '../../../../lib/supabase';
+import { MCPTool } from '../../../../lib/types';
 
 /**
  * MCP-compatible server implementation

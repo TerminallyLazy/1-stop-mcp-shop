@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { MCPServer, MCPTool } from "@/lib/types";
-import { getUserSession } from "@/lib/supabase";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../../components/ui/dialog";
+import { MCPServer, MCPTool } from "../../lib/types";
+import { getUserSession } from "../../lib/supabase";
 
 interface ServerDeploymentProps {
   tools: MCPTool[];
@@ -208,7 +208,7 @@ export function ServerDeployment({
             
             <div>
               <h3 className="text-sm font-medium mb-2">Hosting Plan</h3>
-              <Tabs defaultValue={currentPlan} onValueChange={(value) => setCurrentPlan(value as "free" | "premium")}>
+              <Tabs defaultValue={currentPlan} onValueChange={(value: string) => setCurrentPlan(value as "free" | "premium")}>
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="free">Free</TabsTrigger>
                   <TabsTrigger value="premium">Premium</TabsTrigger>
@@ -467,14 +467,14 @@ export function ServerDeployment({
             <p className="font-medium mb-1">Usage Instructions:</p>
             <p className="text-muted-foreground mb-2">In your conversation with an AI assistant, simply say:</p>
             <code className="block bg-background p-2 rounded border whitespace-normal break-all">
-              Please use the MCP server at https://agent.mcpify.ai/sse?server={deployedServer?.id || '[server-id]'}
+              Please use the MCP server at {window.location.origin}/api/mcp/{deployedServer?.id || '[server-id]'}
             </code>
           </div>
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
             <Button
               variant="outline"
               onClick={() => {
-                navigator.clipboard.writeText(`https://agent.mcpify.ai/sse?server=${deployedServer?.id || ""}`);
+                navigator.clipboard.writeText(`${window.location.origin}/api/mcp/${deployedServer?.id || ""}`);
               }}
               className="sm:flex-1"
             >

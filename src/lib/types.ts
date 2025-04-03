@@ -19,6 +19,11 @@ export interface MCPServer {
     prompts: boolean;
     sampling: boolean;
   };
+  connectionDetails?: {
+    method: 'url' | 'config';
+    url?: string;
+    config?: string;
+  };
 }
 
 export interface MCPTool {

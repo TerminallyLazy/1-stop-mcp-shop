@@ -1,0 +1,8 @@
+# Server configuration
+PORT=3000
+NODE_ENV=development
+
+# Add your API keys below
+# OPENAI_API_KEY=your_openai_api_key
+# WEATHER_API_KEY=your_weather_api_key
+# DATABASE_URL=your_database_connection_string

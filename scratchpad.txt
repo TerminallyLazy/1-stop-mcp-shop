@@ -1,34 +1,103 @@
-# 1-Stop MCP Shop Project Notes
+# Docker Deployment Issue Analysis
 
-## Implemented Features
-- Split-screen UI with chat interface and tools panel
-- Conversational interface for building MCP tools
-- Real-time tool generation display with parameter details
-- Fixed TypeScript errors in server-builder.tsx
-- Added proper type assertions for callbacks
-- Added Spotlight component with hover effect in the main page
+## Error:
+- Docker deployment failed: Command failed: docker compose up -d --build failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1
+- Docker deployment failed: Error response from daemon: Ports are not available: exposing port TCP 0.0.0.0:3000 -> 127.0.0.1:0: listen tcp 0.0.0.0:3000: bind: address already in use
 
-## Fixed Issues
-- Fixed "Type 'never' has no call signatures" error by adding proper type assertions
-- Added missing Input component import
-- Fixed event handling with proper TypeScript types
-- Improved callback handling for "Continue to Deployment" button
+## Potential causes:
+1. The generated package.json file doesn't have the required dependencies properly defined
+2. There's an issue with package-lock.json generation - it's not matching the package.json
+3. File extraction from markdown code blocks may have issues
+4. Environment variables might be missing that are required for npm ci
+5. Port 3000 is already in use by another service when trying to deploy
 
-## MCP Tools Implementation
-- Created mcp-tools.ts with proper formatting according to MCP specifications
-- Implemented snake_case for tool names and camelCase for parameters
-- Added validation for parameter types
-- Created helper functions for formatting tool and parameter names
+## Deployment pipeline:
+1. extractCodeBlocksFromMarkdown extracts files from markdown
+2. Default tsconfig.json and package-lock.json are added if needed
+3. The files are written to a deployment directory
+4. Docker Compose runs to build and deploy
 
-## Spotlight Component Integration
-- Installed framer-motion dependency
-- Created spotlight.tsx component for interactive hover effects
-- Created grid-pattern-spotlight.tsx for the grid pattern demo
-- Integrated the component into the main page empty box
-- Added descriptive text below the component
+## Investigation:
+- In deployment-modal.tsx, a basic package-lock.json is generated but it doesn't include actual dependencies
+- Need to improve package-lock.json generation to include all dependencies from package.json
+- The docker-compose.yml file always uses port 3000, which could be in use
 
-## Next Steps
-- Verify API connectivity for tool generation
-- Test deployment flow end-to-end
-- Implement any missing MCP server components
-- Add more tool templates for common use cases
+## Proposed solution:
+1. Update the package-lock.json generation in deployment-modal.tsx 
+2. Modify the npm ci command in Docker to use npm install instead
+3. Add error details display for npm-related errors
+4. Implement dynamic port allocation to avoid port conflicts:
+   - Added a findAvailablePort() function that checks for an available port starting from 3000
+   - Modified docker-compose.yml generation to use the dynamically assigned port
+   - Updated the returned URL to use the discovered port
+   - Added better error handling for port allocation failures
+
+## Implemented Fixes:
+1. Added dynamic port allocation in route.ts:
+   - Uses net module to test if ports are available
+   - Tries ports starting from 3000 until it finds an available one
+   - Updates docker-compose.yml to use the available port
+   - Returns the correct URL with the discovered port to the frontend
+
+2. Added Docker server integration in client page:
+   - Added a "Docker" tab in the "Add Server" dialog
+   - Created a field to enter Docker deployment path
+   - Implemented handleDockerServerAdd function to:
+     - Validate the Docker deployment path with a new API endpoint
+     - Extract port from docker-compose.yml
+     - Create a server entry with the correct URL (http://localhost:{PORT})
+     - Trigger tool discovery for the Docker server
+   - Created new API endpoint /api/mcp/validate-docker-path to:
+     - Verify that the Docker deployment path exists
+     - Read and parse docker-compose.yml
+     - Extract the published port from the port mapping
+     - Return validation status and port information
+   - Added fallback message for manual URL addition if automatic integration fails
+
+## Docker Server Discovery Issue
+
+**Problem:**
+When connecting to Docker-deployed servers, the client receives HTML instead of JSON from the discovery endpoint. The error is:
+```
+Error discovering tools for server url-docker-1743664173049: Error: Discovery failed: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+```
+Additionally, the error message appears to be repeated infinitely in some cases.
+
+**Root Cause:**
+1. The Docker containers being deployed are simple Nginx static web servers, not MCP protocol servers
+2. The MCP protocol requires servers to respond to JSON-RPC requests, but the Nginx server is returning HTML pages
+3. The discovery process doesn't properly handle HTML responses, causing infinite retries in some cases
+
+**Solution Implementation:**
+1. Enhanced the discovery code to better detect HTML responses:
+   - Added early detection of HTML content before making JSON-RPC requests
+   - Added server header detection to identify Nginx/Apache servers
+   - Improved error messages to clearly explain the issue
+
+2. Fixed infinite retry issues:
+   - Updated the useEffect hook to prevent discovery loops
+   - Limited discovery to one server at a time
+   - Added proper timeout handling for discovery requests
+   - Ensured discovery state is always properly reset
+
+3. Improved UI feedback:
+   - Added clear error messages explaining that Docker containers need to implement MCP protocol
+   - Added warnings in the server details dialog for Docker servers with no tools
+   - Added instructions on how to remove servers with discovery errors
+   - Created a consistent error handling approach throughout the discovery flow
+
+**Future Improvements:**
+- Provide a sample MCP server Docker template
+- Add auto-detection of common MCP server ports
+- Create a more graceful fallback mechanism for non-MCP servers
+
+**Technical Implementation Details:**
+1. Added HTML detection in multiple places:
+   - Initial GET request check
+   - Content-type header inspection
+   - Response body preview analysis
+2. Created a more robust discovery process:
+   - Better state management to prevent loops
+   - Clear timeout handling
+   - Proper error surfacing
+3. Enhanced error messages to be more actionable and user-friendly

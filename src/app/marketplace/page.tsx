@@ -1,5 +1,5 @@
-import { Navbar } from "@/components/layout/navbar";
-import { MarketplaceClient } from "@/components/marketplace/marketplace-client";
+import { Navbar } from "../../components/layout/navbar";
+import { MarketplaceClient } from "../../components/marketplace/marketplace-client";
 
 export default function MarketplacePage() {
   return (

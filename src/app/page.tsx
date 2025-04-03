@@ -1,7 +1,7 @@
-import { Navbar } from "@/components/layout/navbar";
+import { Navbar } from "../components/layout/navbar";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { GridPatternSpotlight } from "@/components/ui/grid-pattern-spotlight";
+import { Button } from "../components/ui/button";
+import { GridPatternSpotlight } from "../components/ui/grid-pattern-spotlight";
 
 export default function Home() {
   return (

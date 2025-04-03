@@ -1,18 +1,99 @@
-"use client";
+import { useState, useEffect, useRef, AwaitedReactNode, JSXElementConstructor, Key, ReactElement, ReactNode, ReactPortal, SetStateAction } from "react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../../components/ui/dialog";
+import { callGeminiAPI } from "../../lib/api/gemini";
+import { callOpenRouterAPI } from "../../lib/api/openrouter";
+import { callMCPTool } from "../../lib/api/mcp";
+import { ChatMessage, MCPServer, ToolCall } from "../../lib/types";
+import { listMCPServers } from "../../lib/api/mcp";
+import { getUserSession } from "../../lib/supabase";
+import { createFollowUpPrompt } from "../../lib/utils/tool-handler";
+import { X } from "lucide-react";
 
-import { useState, useEffect, useRef } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { callGeminiAPI } from "@/lib/api/gemini";
-import { callOpenRouterAPI } from "@/lib/api/openrouter";
-import { callMCPTool } from "@/lib/api/mcp";
-import { ChatMessage, MCPServer, ToolCall } from "@/lib/types";
-import { listMCPServers } from "@/lib/api/mcp";
-import { getUserSession } from "@/lib/supabase";
-import { createFollowUpPrompt } from "@/lib/utils/tool-handler";
+// New component for server details modal
+interface ServerDetailsModalProps {
+  server: MCPServer | null;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+function ServerDetailsModal({ server, isOpen, onClose }: ServerDetailsModalProps) {
+  if (!server) return null;
+  
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md md:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="bg-primary/10 p-1 rounded text-primary">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.29 7 12 12 20.71 7" />
+                <line x1="12" y1="22" x2="12" y2="12" />
+              </svg>
+            </span>
+            {server.name}
+          </DialogTitle>
+          <DialogDescription>{server.description}</DialogDescription>
+        </DialogHeader>
+        
+        <div className="pt-4">
+          <h3 className="text-sm font-medium mb-2">Available Tools ({server.tools.length})</h3>
+          <div className="h-[400px] rounded-md border p-4 overflow-y-auto">
+            <div className="space-y-4">
+              {server.tools.map((tool) => (
+                <div key={tool.id} className="border rounded-lg p-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h4 className="font-medium">{tool.name}</h4>
+                      <p className="text-sm text-muted-foreground">{tool.description}</p>
+                    </div>
+                    <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+                      {tool.parameters.length} params
+                    </span>
+                  </div>
+                  
+                  {tool.parameters.length > 0 && (
+                    <div className="mt-3">
+                      <h5 className="text-xs font-medium text-muted-foreground mb-1">Parameters:</h5>
+                      <div className="space-y-2">
+                        {tool.parameters.map((param, index) => (
+                          <div key={index} className="bg-muted/40 text-sm rounded p-2">
+                            <div className="flex justify-between">
+                              <span className="font-mono text-xs">{param.name}</span>
+                              <div className="flex items-center gap-1">
+                                <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-secondary-foreground">
+                                  {param.type}
+                                </span>
+                                {param.required && (
+                                  <span className="inline-flex items-center rounded-full bg-destructive px-2 py-0.5 text-[10px] font-semibold text-destructive-foreground">
+                                    required
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <p className="text-xs mt-1 text-muted-foreground">{param.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function EnhancedMCPClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -25,6 +106,20 @@ export function EnhancedMCPClient() {
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCall[]>([]);
   const [userSession, setUserSession] = useState<{user: any, subscription?: string}|null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // State for the server details modal
+  const [selectedServerForDetails, setSelectedServerForDetails] = useState<MCPServer | null>(null);
+  const [isServerDetailsOpen, setIsServerDetailsOpen] = useState(false);
+
+  // Function to show server details
+  const showServerDetails = (server: MCPServer) => {
+    setSelectedServerForDetails(server);
+    setIsServerDetailsOpen(true);
+  };
+  
+  // Function to close server details modal
+  const closeServerDetails = () => {
+    setIsServerDetailsOpen(false);
+  };
 
   // Fetch user session and available servers
   useEffect(() => {
@@ -124,7 +219,7 @@ export function EnhancedMCPClient() {
             
             // Find the server that has this tool
             const serverWithTool = servers.find(server => 
-              server.tools.some(tool => tool.name === toolName)
+              server.tools.some((tool: { name: any; }) => tool.name === toolName)
             );
             
             if (serverWithTool) {
@@ -164,13 +259,13 @@ export function EnhancedMCPClient() {
         
         // Find the server that has this tool
         const serverWithTool = servers.find(server => 
-          server.tools.some(tool => tool.name === toolName || 
+          server.tools.some((tool: { name: string; }) => tool.name === toolName || 
                                    tool.name === `get_${toolName}`)
         );
         
         if (serverWithTool) {
           // Find the exact tool
-          const exactToolName = serverWithTool.tools.find(t => 
+          const exactToolName = serverWithTool.tools.find((t: { name: string; }) => 
             t.name === toolName || t.name === `get_${toolName}`
           )?.name || toolName;
           
@@ -194,11 +289,11 @@ export function EnhancedMCPClient() {
         
         // Find the server that has this tool
         const serverWithTool = servers.find(server => 
-          server.tools.some(tool => tool.name === toolName)
+          server.tools.some((tool: { name: string; }) => tool.name === toolName)
         );
         
         if (serverWithTool) {
-          const tool = serverWithTool.tools.find(t => t.name === toolName);
+          const tool = serverWithTool.tools.find((t: { name: string; }) => t.name === toolName);
           
           if (tool) {
             // Parse parameters from the string
@@ -230,14 +325,14 @@ export function EnhancedMCPClient() {
     
     // Weather pattern
     if (content.toLowerCase().includes('weather') && servers.some(server => 
-      server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+      server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('weather') || tool.name.includes('get_weather'))
     )) {
       const weatherServer = servers.find(server => 
-        server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+        server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('weather') || tool.name.includes('get_weather'))
       );
       
       if (weatherServer) {
-        const weatherTool = weatherServer.tools.find(tool => 
+        const weatherTool = weatherServer.tools.find((tool: { name: string | string[]; }) => 
           tool.name.includes('weather') || tool.name.includes('get_weather')
         );
         
@@ -277,14 +372,14 @@ export function EnhancedMCPClient() {
     
     // Calculator pattern
     if ((content.toLowerCase().includes('calculate') || content.match(/\d+[\+\-\*\/]\d+/)) && 
-        servers.some(server => server.tools.some(tool => tool.name.includes('calculate')))) {
+        servers.some(server => server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('calculate')))) {
       
       const calcServer = servers.find(server => 
-        server.tools.some(tool => tool.name.includes('calculate'))
+        server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('calculate'))
       );
       
       if (calcServer) {
-        const calcTool = calcServer.tools.find(tool => 
+        const calcTool = calcServer.tools.find((tool: { name: string | string[]; }) => 
           tool.name.includes('calculate')
         );
         
@@ -393,7 +488,7 @@ export function EnhancedMCPClient() {
           prompts: Array.isArray(server.prompts) && server.prompts.length > 0 ? {} : false,
           sampling: false
         },
-        tools: server.tools.map(tool => ({
+        tools: server.tools.map((tool: { name: any; description: any; parameters: any; }) => ({
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters
@@ -408,11 +503,11 @@ export function EnhancedMCPClient() {
 ${availableServers.map(server => `
 Server: ${server.name}
 Description: ${server.description}
-Tools: ${server.tools.map(tool => tool.name).join(', ')}
+Tools: ${server.tools.map((tool: { name: any; }) => tool.name).join(', ')}
 
-${server.tools.map(tool => `Tool: ${tool.name}
+${server.tools.map((tool: { name: any; description: any; parameters: any[]; }) => `Tool: ${tool.name}
 Description: ${tool.description}
-Parameters: ${tool.parameters.map(p => `${p.name} (${p.type}${p.required ? ', required' : ''})`).join(', ')}
+Parameters: ${tool.parameters.map((p: { name: any; type: any; required: any; }) => `${p.name} (${p.type}${p.required ? ', required' : ''})`).join(', ')}
 `).join('\n')}
 `).join('\n')}
 
@@ -449,7 +544,7 @@ You can use these tools to retrieve information or take actions for the user. On
           content: `You are a helpful assistant that can have natural conversations with users. You can use tools when appropriate to get information needed to answer questions.
 
 Available tools: ${installedServers.map(server => 
-            server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
+            server.tools.map((tool: { name: any; description: any; }) => `${tool.name} - ${tool.description}`).join(', ')
           ).join('. ')}
 
 When you need to use a tool, format it like this:
@@ -489,7 +584,7 @@ User message: ${userMessage.content}`,
           id: `user-${Date.now()}`,
           role: 'user',
           content: `You are a helpful assistant with access to tools. Available tools: ${installedServers.map(server => 
-            server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
+            server.tools.map((tool: { name: any; description: any; }) => `${tool.name} - ${tool.description}`).join(', ')
           ).join('. ')}
 
 You can use these tools when needed to help answer questions. Use a format like:
@@ -616,7 +711,7 @@ My question is: ${userMessage.content}`,
       
       // Find the server that has this tool
       const server = installedServers.find(server => 
-        server.tools.some(tool => tool.name === toolCall.tool)
+        server.tools.some((tool: { name: any; }) => tool.name === toolCall.tool)
       );
       
       if (!server) {
@@ -950,87 +1045,44 @@ My question is: ${userMessage.content}`,
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="md:col-span-1">
           <Card>
-            <CardHeader>
-              <CardTitle>MCP Servers</CardTitle>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">MCP Servers</CardTitle>
               <CardDescription>
                 Connected servers extend AI capabilities
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {installedServers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No servers installed</p>
-                ) : (
-                  installedServers.map(server => (
-                    <div key={server.id} className="flex items-center justify-between border rounded-lg p-2">
-                      <div>
-                        <div className="font-medium text-sm">{server.name}</div>
-                        <div className="text-xs text-muted-foreground">{server.tools.length} tools</div>
+                {installedServers.map(server => (
+                  <Button 
+                    key={server.id}
+                    variant="outline" 
+                    className="w-full justify-between group hover:border-primary/50"
+                    onClick={() => showServerDetails(server)}
+                  >
+                    <div className="text-left">
+                      <div className="font-medium flex items-center">
+                        {server.name}
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => handleRemoveServer(server.id)}
-                        className="h-6 w-6 p-0"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <path d="M18 6 6 18" />
-                          <path d="m6 6 12 12" />
-                        </svg>
-                        <span className="sr-only">Remove</span>
-                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        {server.tools.length} tools
+                      </div>
                     </div>
-                  ))
-                )}
+                    <span className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+                      Details
+                    </span>
+                  </Button>
+                ))}
               </div>
             </CardContent>
             <CardFooter>
-              <Dialog open={showServerDialog} onOpenChange={setShowServerDialog}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="w-full">
-                    Add Server
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add MCP Server</DialogTitle>
-                    <DialogDescription>
-                      Select a server to add to your MCP Client
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                      {availableServers.map(server => (
-                        <div 
-                          key={server.id} 
-                          className="flex justify-between items-center border rounded-lg p-3 hover:bg-muted/50 cursor-pointer"
-                          onClick={() => handleInstallServer(server)}
-                        >
-                          <div>
-                            <div className="font-medium">{server.name}</div>
-                            <div className="text-sm text-muted-foreground">{server.description}</div>
-                          </div>
-                          <Button size="sm">Install</Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setShowServerDialog(false)}>Cancel</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setShowServerDialog(true)}
+              >
+                Add Server
+              </Button>
             </CardFooter>
           </Card>
           
@@ -1101,7 +1153,7 @@ My question is: ${userMessage.content}`,
             <CardHeader>
               <CardTitle>MCP Client</CardTitle>
               <CardDescription>
-                Interact with AI using MCP tools
+                 MCP tools
               </CardDescription>
             </CardHeader>
             <CardContent className="flex-grow overflow-y-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>
@@ -1230,7 +1282,7 @@ My question is: ${userMessage.content}`,
                             {/* Display tool calls in collapsible sections */}
                             {message.toolCalls && message.toolCalls.length > 0 && (
                               <div className="mt-2">
-                                {message.toolCalls.map(toolCall => (
+                                {message.toolCalls.map((toolCall: { id: Key | null | undefined; tool: string | number | bigint | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | Promise<AwaitedReactNode> | null | undefined; args: any; }) => (
                                   <div key={toolCall.id} className="text-sm">
                                     <details className="cursor-pointer">
                                       <summary className="flex items-center">
@@ -1298,8 +1350,8 @@ My question is: ${userMessage.content}`,
                 <Input
                   placeholder="Type your message..."
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
+                  onChange={(e: { target: { value: SetStateAction<string>; }; }) => setInput(e.target.value)}
+                  onKeyDown={(e: { key: string; shiftKey: any; preventDefault: () => void; }) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
                       handleSendMessage();
@@ -1317,6 +1369,13 @@ My question is: ${userMessage.content}`,
           </Card>
         </div>
       </div>
+      
+      {/* Server Details Modal */}
+      <ServerDetailsModal 
+        server={selectedServerForDetails} 
+        isOpen={isServerDetailsOpen} 
+        onClose={closeServerDetails} 
+      />
     </div>
   );
 }

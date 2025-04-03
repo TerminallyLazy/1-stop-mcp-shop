@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChatMessage } from "@/lib/types";
+import { ChatMessage, ToolCall } from "../../lib/types";
 import { ToolResultDisplay } from "./tool-result-display";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Button } from "../ui/button";
@@ -9,9 +9,10 @@ import { Button } from "../ui/button";
 interface ChatContainerProps {
   messages: ChatMessage[];
   isLoading: boolean;
+  activeToolCalls?: ToolCall[];
 }
 
-export function ChatContainer({ messages, isLoading }: ChatContainerProps) {
+export function ChatContainer({ messages, isLoading, activeToolCalls = [] }: ChatContainerProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Scroll to bottom when messages change
@@ -110,6 +111,24 @@ export function ChatContainer({ messages, isLoading }: ChatContainerProps) {
           </div>
         </div>
       )}
+      
+      {/* Display active tool calls that are in progress */}
+      {activeToolCalls.length > 0 && (
+        <div className="flex justify-start">
+          <div className="max-w-[80%] rounded-lg px-4 py-2 bg-blue-500/20 text-foreground border border-blue-500/50">
+            <div className="text-xs mb-1">Tool in progress:</div>
+            {activeToolCalls.map(toolCall => (
+              <div key={toolCall.id} className="text-sm font-medium">
+                {toolCall.tool}
+                <div className="text-xs text-muted-foreground mt-1">
+                  Parameters: {JSON.stringify(toolCall.args)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
       <div ref={messagesEndRef} />
     </div>
   );

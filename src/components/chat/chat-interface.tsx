@@ -1,26 +1,28 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { ChatMessage } from "@/lib/types";
+import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
+import { ChatMessage } from "../../lib/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface ChatInterfaceProps {
   messages: ChatMessage[];
   onSendMessage: (message: string) => void;
-  onInitialSubmit: (query: string) => void;
-  isGenerating: boolean;
+  isLoading?: boolean;
+  initialPrompt?: string;
   initialMode: boolean;
 }
 
 export function ChatInterface({ 
   messages, 
-  onSendMessage, 
-  onInitialSubmit, 
-  isGenerating, 
+  onSendMessage,
+  isLoading = false,
+  initialPrompt,
   initialMode 
 }: ChatInterfaceProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialPrompt || '');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Auto-scroll to bottom when messages change
@@ -32,18 +34,13 @@ export function ChatInterface({
     e.preventDefault();
     if (!input.trim()) return;
     
-    if (initialMode) {
-      onInitialSubmit(input);
-    } else {
-      onSendMessage(input);
-    }
-    
+    onSendMessage(input);
     setInput('');
   };
   
   return (
     <div className="flex flex-col h-full bg-card rounded-md border">
-      <div className="p-4 border-b flex items-center justify-between">
+      <div className="p-3 border-b flex items-center justify-between">
         <h2 className="font-semibold text-lg">MCPify.ai</h2>
         <div className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs rounded-full px-2 py-1 flex items-center gap-1">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
@@ -55,7 +52,7 @@ export function ChatInterface({
         </div>
       </div>
       
-      <div className="flex-grow overflow-y-auto p-4 space-y-4">
+      <div className="flex-grow overflow-y-auto p-3 space-y-4">
         {initialMode && messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md p-6 bg-muted/50 rounded-lg">
@@ -93,15 +90,50 @@ export function ChatInterface({
                     : 'bg-primary text-primary-foreground text-right ml-auto'
                 }`}
               >
-                <div className="whitespace-pre-wrap break-words text-sm">
-                  {message.content}
-                </div>
+                {message.role === 'user' ? (
+                  <div className="whitespace-pre-wrap break-words text-sm">
+                    {message.content}
+                  </div>
+                ) : (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({ children }) => <p className="mb-2 text-sm">{children}</p>,
+                      pre: ({ node, children, ...props }: any) => (
+                        <pre className="bg-gray-800 text-gray-200 p-4 rounded-md my-4 overflow-x-auto text-sm" {...props}>
+                          {children}
+                        </pre>
+                      ),
+                      code: ({ node, inline, className, children, ...props }: any) => {
+                        return inline ? (
+                          <code className="bg-gray-800 px-1.5 py-0.5 rounded text-gray-200 text-sm font-mono" {...props}>
+                            {children}
+                          </code>
+                        ) : (
+                          <code className="block w-full text-gray-200 font-mono" {...props}>
+                            {children}
+                          </code>
+                        )
+                      },
+                      a: ({ href, children }) => <a href={href} className="text-blue-500 hover:underline">{children}</a>,
+                      ul: ({ children }) => <ul className="list-disc ml-5 mb-2">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal ml-5 mb-2">{children}</ol>,
+                      li: ({ children }) => <li className="mb-1">{children}</li>,
+                      h1: ({ children }) => <h1 className="text-xl font-bold mb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-md font-bold mb-2">{children}</h3>,
+                      blockquote: ({ children }) => <blockquote className="border-l-4 border-gray-500 pl-2 py-1 my-2">{children}</blockquote>,
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                )}
               </div>
             </div>
           ))
         )}
         
-        {isGenerating && (
+        {isLoading && (
           <div className="flex justify-start">
             <div className="max-w-[80%] rounded-lg px-4 py-2 bg-muted">
               <div className="flex space-x-2 items-center text-sm">
@@ -116,32 +148,32 @@ export function ChatInterface({
         <div ref={messagesEndRef} />
       </div>
       
-      <div className="p-4 border-t mt-auto">
+      <div className="p-3 border-t mt-auto">
         <form onSubmit={handleSubmit} className="flex space-x-2">
           <Textarea
             placeholder={initialMode 
-              ? "Describe the MCP Server you want to build..." 
+              ? (initialPrompt || "Describe the MCP Server you want to build...") 
               : "Ask about your MCP server tools..."
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
+            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 handleSubmit(e);
               }
             }}
             className="min-h-10 flex-grow resize-none"
-            disabled={isGenerating}
+            disabled={isLoading}
           />
           <Button 
             type="submit"
             variant={initialMode ? "default" : "default"}
             className={initialMode ? "bg-green-600 hover:bg-green-700" : ""}
-            disabled={!input.trim() || isGenerating}
+            disabled={!input.trim() || isLoading}
           >
             {initialMode ? (
-              "Generate my AI Tools"
+              "Create MCP Server"
             ) : (
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                 <line x1="22" y1="2" x2="11" y2="13"></line>
