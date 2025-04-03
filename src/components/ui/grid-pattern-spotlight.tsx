@@ -1,6 +1,6 @@
 "use client";
 
-import { Spotlight } from "@/components/ui/spotlight";
+import { Spotlight } from "../../components/ui/spotlight";
 
 export function GridPatternSpotlight() {
   return (

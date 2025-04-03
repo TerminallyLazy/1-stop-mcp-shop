@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { MCPTool, ChatMessage } from "@/lib/types";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Textarea } from "../../components/ui/textarea";
+import { Input } from "../../components/ui/input";
+import { MCPTool, ChatMessage } from "../../lib/types";
 
 // Define the callback type
 type ToolsGeneratedCallback = (tools: MCPTool[], description: string) => void;
@@ -27,6 +27,9 @@ export function SplitViewBuilder({ onToolsGenerated }: SplitViewBuilderProps) {
   const [generatedTools, setGeneratedTools] = useState<MCPTool[]>([]);
   const [envVars, setEnvVars] = useState<{name: string, value: string, required: boolean}[]>([]);
   
+  // State for generated server code
+  const [generatedServerCode, setGeneratedServerCode] = useState<string | null>(null);
+  
   // State for build progress
   const [buildProgress, setBuildProgress] = useState(0);
   
@@ -43,10 +46,12 @@ export function SplitViewBuilder({ onToolsGenerated }: SplitViewBuilderProps) {
     if (!initialQuery.trim()) return;
     
     setIsGenerating(true);
+    setGeneratedServerCode(null); // Reset server code on new generation
+    setGeneratedTools([]); // Reset generated tools
     
     try {
       // Start progress animation
-      simulateProgress(0, 40);
+      simulateProgress(0, 15); // Phase 1: Initial analysis
       
       // Create initial user message
       const userMessage: ChatMessage = {
@@ -58,60 +63,210 @@ export function SplitViewBuilder({ onToolsGenerated }: SplitViewBuilderProps) {
       
       setChatMessages([userMessage]);
       
-      // Import the generateMCPTools function
-      const { generateMCPTools, createDefaultTools } = await import('@/lib/api/mcp');
+      // === Step 1: Get initial analysis from LLM ===
+      const { callGeminiAPI } = await import('../../lib/api/gemini');
       
-      // Try to generate tools, fallback to default if needed
-      let tools;
+      // Create system prompt for first LLM call
+      const initialSystemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers. 
+The user has requested an MCP server for: "${initialQuery}".
+
+Your task is to analyze this request and suggest appropriate tools that this MCP server should implement.
+For each tool, provide:
+1. A name in snake_case format
+2. A detailed description of what the tool does
+3. Required parameters with names, types, and descriptions
+
+Format your response as a conversational analysis of what's needed, focusing on how the tools would work together.
+Be thorough but concise. Don't include any code yet.`;
+
+      const initialMessage: ChatMessage[] = [
+        {
+          role: 'system',
+          content: initialSystemPrompt,
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          createdAt: new Date().toISOString()
+        },
+        userMessage
+      ];
+      
+      // First LLM call - initial analysis
+      simulateProgress(15, 30);
+      const initialResponse = await callGeminiAPI(initialMessage);
+      
+      if (!initialResponse?.message?.content) {
+        throw new Error("Failed to get initial response from LLM");
+      }
+      
+      // Add assistant's initial analysis to chat
+      const initialAssistantMessage: ChatMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        role: 'assistant',
+        content: initialResponse.message.content,
+        createdAt: new Date().toISOString()
+      };
+      
+      setChatMessages(prev => [...prev, initialAssistantMessage]);
+      
+      // === Step 2: Second LLM call to generate tools structure ===
+      simulateProgress(30, 50);
+      
+      const secondSystemPrompt = `You are an AI engineering assistant specialized in generating MCP (Model Context Protocol) tools.
+The user has requested an MCP server for: "${initialQuery}".
+
+An initial analysis has been provided:
+${initialResponse.message.content}
+
+Your task is to convert this analysis into structured JSON tool definitions following the MCP specification. 
+Each tool needs:
+1. A name in snake_case format
+2. A description explaining what the tool does
+3. Parameters with:
+   - name (camelCase)
+   - type (string, number, boolean, object, array)
+   - description
+   - required (boolean)
+   - enum (optional array of allowed values)
+   - default (optional default value)
+
+Return ONLY a JSON array of tools in the exact format:
+[
+  {
+    "name": "tool_name",
+    "description": "Clear description of what the tool does",
+    "parameters": [
+      {
+        "name": "paramName",
+        "type": "string|number|boolean|object|array",
+        "description": "What this parameter is used for",
+        "required": true/false,
+        "enum": ["option1", "option2"],
+        "default": "default_value"
+      }
+    ]
+  }
+]`;
+
+      const secondMessage: ChatMessage[] = [
+        {
+          role: 'system',
+          content: secondSystemPrompt,
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          createdAt: new Date().toISOString()
+        },
+        userMessage,
+        initialAssistantMessage
+      ];
+      
+      // Second LLM call - generate tool structure
+      const toolsResponse = await callGeminiAPI(secondMessage);
+      
+      if (!toolsResponse?.message?.content) {
+        throw new Error("Failed to get tools structure from LLM");
+      }
+      
+      // Parse JSON tools from response
+      let tools: MCPTool[] = [];
       try {
-        console.log('Generating tools with API...');
-        tools = await generateMCPTools(initialQuery, "gemini-2.5-pro-exp-03-25");
-      } catch (apiError) {
-        console.error('Error with API call, using default tools:', apiError);
+        const toolsContent = toolsResponse.message.content;
+        const jsonMatch = toolsContent.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        
+        if (jsonMatch) {
+          const parsedTools = JSON.parse(jsonMatch[0]);
+          
+          if (Array.isArray(parsedTools) && parsedTools.length > 0) {
+            // Process and format the tools
+            const now = new Date().toISOString();
+            tools = parsedTools.map((tool: any) => ({
+              id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+              name: tool.name || `tool_${Math.random().toString(36).substring(2, 7)}`,
+              description: tool.description || 'A generated tool for this MCP server',
+              parameters: Array.isArray(tool.parameters) ? tool.parameters.map((param: any) => ({
+                name: param.name || 'param',
+                type: ['string', 'number', 'boolean', 'object', 'array'].includes(param.type) ? param.type : 'string',
+                description: param.description || `Parameter for ${param.name || 'this tool'}`,
+                required: param.required === true,
+                enum: Array.isArray(param.enum) ? param.enum : undefined,
+                default: param.default
+              })) : [],
+              serverId: '',
+              createdAt: now,
+              updatedAt: now
+            }));
+          }
+        }
+      } catch (parseError) {
+        console.error("Error parsing tools JSON:", parseError);
+        
+        // Import fallback tools
+        const { generateMCPTools, createDefaultTools } = await import('../../lib/api/mcp');
         tools = createDefaultTools(initialQuery);
       }
       
       setGeneratedTools(tools);
       
-      // Now generate an assistant response
-      const { callGeminiAPI } = await import('@/lib/api/gemini');
+      // === Step 3: Generate Server Code ===
+      simulateProgress(50, 70);
       
-      // Create system prompt for Gemini
-      const systemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers based on user requirements. The user has requested an MCP server with the following description: "${initialQuery}".
-        
-I've already generated these tools:
-${tools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
+      try {
+        console.log('Generating MCP server code...');
+        const { generateMCPServerCode } = await import('../../lib/api/mcp');
+        const serverCode = await generateMCPServerCode(initialQuery, tools);
+        setGeneratedServerCode(serverCode);
+      } catch (serverGenError) {
+        console.error('Error generating server code:', serverGenError);
+        const serverGenErrorMessage: ChatMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          role: 'assistant',
+          content: "I was able to identify the tools needed, but encountered an error while generating the full server code. We can still refine the tools and environment variables.",
+          createdAt: new Date().toISOString()
+        };
+        setChatMessages(prev => [...prev, serverGenErrorMessage]);
+      }
+      
+      // === Step 4: Generate Welcome Message ===
+      simulateProgress(70, 90);
+      
+      // Create system prompt for welcome message
+      const welcomeSystemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers.
+The user has requested an MCP server for: "${initialQuery}".
 
-Your task is to:
-1. Refine these tools by asking clarifying questions
-2. Help identify any required API keys or environment variables
-3. Suggest improvements or additional tools the user might need
-4. Guide the user through configuring and building their MCP server
+I've generated these tools to implement:
+${JSON.stringify(tools, null, 2)}
 
-Be conversational but efficient, focusing on practical development details.`;
+${generatedServerCode ? "I've also generated the initial TypeScript server code implementing these tools." : "I encountered an issue generating the full server code, but we can proceed with configuring the tools."}
 
-      // Prepare welcome message
-      const welcomeMessage = `I'll help you build a complete MCP server based on your requirements. I've analyzed your description and created these initial tools shown on the right panel.
+Your task is to provide a friendly, helpful message to the user:
+1. Explain what MCP tools you've identified for their needs
+2. Mention that the server code has been generated
+3. Suggest next steps (environment variables, potential improvements, etc.)
+4. Ask if they'd like to make any changes to the tools
 
-Let's refine this further:
+Be conversational and helpful, explaining your choices.`;
 
-1. For each tool, do you need any specific features or parameters beyond what's shown?
-2. Will you need authentication for any of these tools (API keys, tokens, etc.)?
-3. Are there any additional tools you'd like to add?
-
-I'll help customize these tools and prepare everything for deployment. Feel free to ask questions or request changes at any point.`;
-
-      // Add assistant response
-      const assistantMessage: ChatMessage = {
+      const welcomeMessages: ChatMessage[] = [
+        {
+          role: 'system',
+          content: welcomeSystemPrompt,
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          createdAt: new Date().toISOString()
+        },
+        userMessage
+      ];
+      
+      // Final LLM call - welcome message
+      const welcomeResponse = await callGeminiAPI(welcomeMessages);
+      
+      // Add assistant welcome message
+      const welcomeMessage: ChatMessage = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         role: 'assistant',
-        content: welcomeMessage,
+        content: welcomeResponse?.message?.content || "I've analyzed your request and created tools to meet your needs. You can see them in the panel on the right. Let me know if you'd like to make any changes!",
         createdAt: new Date().toISOString()
       };
       
-      setChatMessages(prev => [...prev, assistantMessage]);
+      setChatMessages(prev => [...prev, welcomeMessage]);
       
-      // Create initial environment variables based on tools
+      // Create suggested environment variables based on tools
       const suggestedVars = extractPotentialEnvVars(tools, initialQuery);
       setEnvVars(suggestedVars);
       
@@ -119,26 +274,29 @@ I'll help customize these tools and prepare everything for deployment. Feel free
       setIsInitialQuerySubmitted(true);
       
       // Continue progress animation
-      simulateProgress(40, 60);
+      simulateProgress(90, 95);
       
       // Call the callback function if provided
       if (onToolsGenerated) {
-        (onToolsGenerated as (tools: MCPTool[], desc: string) => void)(tools, initialQuery);
+        onToolsGenerated(tools, initialQuery);
       }
     } catch (error) {
-      console.error("Error generating tools:", error);
-      
-      // Add error message to chat
+      console.error("Error during initial generation:", error);
+      // Add general error message to chat
       const errorMessage: ChatMessage = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         role: 'assistant',
-        content: "I encountered an error while generating tools. Let's try again or please provide more details about what you're looking to build.",
+        content: "I encountered an unexpected error during the setup process. Please try refining your request or starting again.",
         createdAt: new Date().toISOString()
       };
-      
       setChatMessages(prev => [...prev, errorMessage]);
+      setBuildProgress(0); // Reset progress on error
     } finally {
       setIsGenerating(false);
+      // Ensure progress reaches near completion if successful, or resets if failed
+      if (buildProgress > 0 && buildProgress < 90) {
+        setBuildProgress(95); // Indicate completion of setup phase
+      }
     }
   };
   
@@ -169,42 +327,43 @@ I'll help customize these tools and prepare everything for deployment. Feel free
         ? `Current environment variables:\n${envVars.map(v => `${v.name}${v.required ? ' [required]' : ''}`).join('\n')}`
         : 'No environment variables configured yet.';
       
+      // Add generated code context if available
+      const serverCodeContext = generatedServerCode 
+         ? `\nGenerated Server Code (Partial):\n\`\`\`typescript\n${generatedServerCode.substring(0, 300)}...\n\`\`\`\n(Full code generated initially)` 
+         : '\nServer code generation was skipped or failed.';
+
       // Create system prompt with context
       const systemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers based on user requirements. 
         
-The user has requested an MCP server with the following description: "${initialQuery}".
+The user's initial request: "${initialQuery}".
 
 Current tools:
 ${toolsContext}
 
 ${envVarsContext}
+${serverCodeContext}
 
 Build progress: ${Math.round(buildProgress)}%
 
-Respond conversationally to the user, helping them refine their MCP server. Focus on practical details. Suggest improvements, and help identify missing environment variables or configuration needed. Keep responses under 150 words.`;
+Respond conversationally to the user, helping them refine their MCP server. Focus on practical details like tool parameters, environment variables, and potential issues. ${generatedServerCode ? 'You can also answer questions about the generated server code structure or logic shown.' : ''} Keep responses concise and focused on the next steps.`;
       
       // Format messages for API
-      const formattedMessages = [
+      const formattedMessages: ChatMessage[] = [
         {
-          role: 'system',
-          content: systemPrompt
+          role: 'system' as "system",
+          content: systemPrompt,
+          id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          createdAt: new Date().toISOString()
         },
-        ...chatMessages.map(msg => ({
-          role: msg.role,
-          content: msg.content
-        }))
+        ...chatMessages
       ];
       
       // Call the Gemini API
-      const { callGeminiAPI } = await import('@/lib/api/gemini');
-      const response = await callGeminiAPI({
-        model: 'gemini-2.5-pro-exp-03-25',
-        messages: formattedMessages,
-      });
+      const { callGeminiAPI } = await import('../../lib/api/gemini');
+      const response = await callGeminiAPI(formattedMessages);
       
-      const responseContent = response?.content || "I'm sorry, I couldn't generate a response. Let's continue building your MCP server.";
-      
-      // Add assistant response
+      const responseContent = response?.message?.content || "I'm sorry, I couldn't generate a response. Let's continue building your MCP server.";
+      // Add assistant response 
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         role: 'assistant',
@@ -419,7 +578,7 @@ Respond conversationally to the user, helping them refine their MCP server. Focu
     }
     
     // Deduplicate
-    const uniqueKeys = [...new Set(allMatches)];
+    const uniqueKeys = Array.from(new Set(allMatches));
     
     // Check for requirements context
     for (const key of uniqueKeys) {
@@ -500,16 +659,16 @@ Respond conversationally to the user, helping them refine their MCP server. Focu
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  <span>Generating...</span>
+                  <span>Building Your MCP Server...</span>
                 </div>
-              ) : "Generate My AI Tools"}
+              ) : "Create MCP Server"}
             </Button>
           </CardFooter>
         </Card>
       ) : (
-        // Split view interface - will be shown in a grid layout by the parent component
-        <div className="w-full h-full flex flex-col">
-          {/* Chat Interface */}
+        <div className="w-full h-full grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+          {/* Left Panel: Chat Interface */}
           <div className="flex-grow overflow-hidden flex flex-col h-full bg-card rounded-md border">
             <div className="p-4 border-b flex items-center justify-between">
               <h2 className="font-semibold text-lg">AI Assistant</h2>
@@ -585,6 +744,124 @@ Respond conversationally to the user, helping them refine their MCP server. Focu
                   </svg>
                 </Button>
               </div>
+            </div>
+          </div>
+
+          {/* Right Panel: MCP Tools & Config */}
+          <div className="flex-grow overflow-hidden flex flex-col h-full bg-card rounded-md border">
+            <div className="p-4 border-b">
+              <h2 className="font-semibold text-lg">MCP Tools</h2>
+              {/* Progress Bar */}
+              <div className="w-full bg-muted rounded-full h-2.5 mt-2">
+                <div 
+                  className="bg-primary h-2.5 rounded-full transition-all duration-500 ease-out" 
+                  style={{ width: `${buildProgress}%` }}
+                ></div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{Math.round(buildProgress)}% Complete</p>
+            </div>
+            
+            {/* Tools Panel */}
+            <div className="flex-grow overflow-y-auto p-4 space-y-6">
+              {generatedTools.length > 0 ? (
+                <div className="space-y-4">
+                  {generatedTools.map((tool, index) => (
+                    <Card key={tool.id || index} className="overflow-hidden">
+                      <div className="bg-blue-500/20 text-foreground border-b border-blue-500/50 px-4 py-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-500">
+                              <path d="M14 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+                              <path d="M14 24v-5.5l2.5-2.5-7-7-2.5 2.5L1.5 6"/>
+                              <path d="m8.5 8.5 7 7"/>
+                              <path d="m15 8 7 7"/>
+                            </svg>
+                            <span className="font-semibold">{tool.name}</span>
+                          </div>
+                          <div className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full px-2 py-0.5">
+                            {tool.parameters.length} {tool.parameters.length === 1 ? "parameter" : "parameters"}
+                          </div>
+                        </div>
+                        <p className="text-sm mt-1 text-muted-foreground">{tool.description}</p>
+                      </div>
+
+                      {tool.parameters.length > 0 && (
+                        <div className="p-3 bg-muted/30">
+                          <div className="text-xs mb-2 font-medium">Parameters:</div>
+                          <div className="space-y-2">
+                            {tool.parameters.map((param, pIndex) => (
+                              <div key={pIndex} className="text-xs bg-background rounded border p-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="font-mono font-medium">
+                                    {param.name}
+                                    {param.required && <span className="text-red-500 ml-1">*</span>}
+                                  </div>
+                                  <div className="text-muted-foreground">{param.type}</div>
+                                </div>
+                                <div className="mt-1">{param.description}</div>
+                                {param.enum && (
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {param.enum.map((value, eIndex) => (
+                                      <span key={eIndex} className="bg-muted-foreground/20 rounded-sm px-1 text-[10px]">{value}</span>
+                                    ))}
+                                  </div>
+                                )}
+                                {param.default !== undefined && (
+                                  <div className="mt-1 text-muted-foreground">
+                                    Default: <span className="font-mono">{JSON.stringify(param.default)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                !isGenerating && (
+                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mb-2">
+                      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                      <circle cx="12" cy="12" r="4"/>
+                    </svg>
+                    <p className="text-sm">No tools generated yet</p>
+                  </div>
+                )
+              )}
+              
+              {/* Environment Variables Section */}
+              {envVars.length > 0 && (
+                <div>
+                  <h3 className="text-md font-semibold mb-3 mt-6">Environment Variables</h3>
+                  <div className="space-y-3">
+                    {envVars.map((envVar, index) => (
+                      <div key={index} className="flex items-center space-x-2">
+                        <label htmlFor={`env-${index}`} className="text-sm font-medium w-1/3 truncate">
+                          {envVar.name}
+                          {envVar.required ? <span className="text-red-500 ml-1">*</span> : ''}
+                        </label>
+                        <Input
+                          id={`env-${index}`}
+                          type="text"
+                          placeholder={`Enter value for ${envVar.name}`}
+                          value={envVar.value}
+                          onChange={(e) => handleEnvVarChange(index, e.target.value)}
+                          className="flex-grow text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Deploy Button */}
+              {generatedTools.length > 0 && (
+                <div className="pt-4 border-t">
+                  <Button className="w-full">Continue to Deployment</Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

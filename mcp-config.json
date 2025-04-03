@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+	"--vision"
+      ],
+      "env": {
+        "PLAYWRIGHT_WS_ENDPOINT": "ws://localhost:36113/"
+      }
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    }
+  }
+}
+ 

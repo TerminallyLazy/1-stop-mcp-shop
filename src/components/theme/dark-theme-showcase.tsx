@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/card";
+import { Button } from "../ui/button";
+import { ThemeToggle } from "./theme-toggle";
 
 export function DarkThemeShowcase() {
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -46,6 +46,23 @@ export function DarkThemeShowcase() {
                 <div className="p-4 border rounded-lg bg-card">
                   <p className="text-sm text-muted-foreground">Card with muted text</p>
                   <p className="font-medium mt-1">Regular text on card background</p>
+                </div>
+
+                {/* Daisy UI Components */}
+                <div className="p-4 border rounded-lg">
+                  <h4 className="text-sm font-medium mb-2">Daisy UI Components</h4>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn btn-primary">Daisy Button</button>
+                    <button className="btn btn-secondary">Secondary</button>
+                    <button className="btn btn-accent">Accent</button>
+                    <button className="btn btn-ghost">Ghost</button>
+                  </div>
+                  <div className="divider">Divider</div>
+                  <div className="flex gap-2 mt-2">
+                    <div className="badge">Badge</div>
+                    <div className="badge badge-primary">Primary</div>
+                    <div className="badge badge-secondary">Secondary</div>
+                  </div>
                 </div>
               </div>
             </div>

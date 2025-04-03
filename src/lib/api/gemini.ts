@@ -96,7 +96,7 @@ function convertToGeminiFormat(messages: ChatMessage[]): GeminiMessage[] {
   return geminiMessages;
 }
 
-export async function callGeminiAPI(messages: ChatMessage[], model: string = 'gemini-2.5-pro-exp-03-25') {
+export async function callGeminiAPI(messages: ChatMessage[], model: string = 'gemini-2.0-flash') {
   try {
     console.log('Calling Gemini API with model:', model);
     // Use the actual Gemini API endpoint

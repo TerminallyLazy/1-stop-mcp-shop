@@ -51,6 +51,9 @@ module.exports = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      borderColor: {
+        DEFAULT: "hsl(var(--border))",
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -81,9 +84,19 @@ module.exports = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate"), require("daisyui")],
+  plugins: [
+    require("tailwindcss-animate"), 
+    require("@tailwindcss/typography"),
+    require("daisyui")
+  ],
   daisyui: {
     themes: ["dark", "light"],
     darkTheme: "dark",
+    base: true,
+    styled: true,
+    utils: true,
+    logs: true,
+    rtl: false,
+    prefix: "",
   },
 }

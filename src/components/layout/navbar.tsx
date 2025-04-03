@@ -1,17 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "../../components/theme/theme-toggle";
+import { Button } from "../../components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+} from "../../components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "../../components/ui/avatar";
 import { useState, useEffect } from "react";
-import { UserSession } from "@/lib/supabase";
+import { UserSession } from "../../lib/supabase";
 
 export function Navbar() {
   const [session, setSession] = useState<UserSession | null>(null);

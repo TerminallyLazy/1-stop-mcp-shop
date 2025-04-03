@@ -1,0 +1,13 @@
+## Available Tools
+
+- **stock_price_fetcher**: Fetches the latest stock price for a given stock ticker symbol from an external API.
+- **stock_price_validator**: Validates the raw stock price data returned by the stock_price_fetcher.
+- **stock_price_formatter**: Formats the validated stock price data into a human-readable string.
+
+## Environment Variables
+
+See .env.example for required environment variables.
+
+## License
+
+MIT

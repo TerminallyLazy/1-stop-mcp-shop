@@ -1,5 +1,5 @@
-import { ToolCall, ChatMessage, MCPServer } from "@/lib/types";
-import { callMCPTool } from "@/lib/api/mcp";
+import { ToolCall, ChatMessage, MCPServer } from "../../lib/types";
+import { callMCPTool } from "../../lib/api/mcp";
 
 /**
  * Enhanced tool handling utilities for the MCP client
@@ -61,7 +61,7 @@ export async function processToolCall(
     
     // Find the server that has this tool
     const server = servers.find(server => 
-      server.tools.some(tool => tool.name === toolCall.tool)
+      server.tools.some((tool: { name: any; }) => tool.name === toolCall.tool)
     );
     
     if (!server) {
@@ -88,12 +88,37 @@ export async function processToolCall(
       tc.id === toolCall.id ? { ...tc, status: 'success', result: JSON.stringify(result) } : tc
     ));
     
-    // Format the response in MCP-compliant format
-    const formattedResult = typeof result === 'string' 
-      ? result 
-      : JSON.stringify(result, null, 2);
+    // Format the response in MCP-compliant format with special handling for Playwright tools
+    let formattedResult = '';
     
-    // Add tool result message to show in the UI
+    // Special handling for browser_navigate and other Playwright tools
+    if (toolCall.tool === 'browser_navigate' || toolCall.tool.includes('navigate') || toolCall.tool.includes('browser')) {
+      // For navigation tools, extract and format the content properly
+      if (result && result.content) {
+        // If result has content property, use it directly
+        formattedResult = typeof result.content === 'string' 
+          ? result.content 
+          : JSON.stringify(result.content, null, 2);
+      } else if (result && result.html) {
+        // If there's HTML content, use that
+        formattedResult = `Content from ${toolCall.args.url || 'webpage'}:\n\n${result.html}`;
+      } else if (result && result.text) {
+        // If there's text content, use that
+        formattedResult = `Content from ${toolCall.args.url || 'webpage'}:\n\n${result.text}`;
+      } else {
+        // Fallback format
+        formattedResult = typeof result === 'string' 
+          ? result 
+          : JSON.stringify(result, null, 2);
+      }
+    } else {
+      // Default formatting for other tools
+      formattedResult = typeof result === 'string' 
+        ? result 
+        : JSON.stringify(result, null, 2);
+    }
+    
+    // Add tool result message to show in the UI with enhanced formatting
     const toolMessage: ChatMessage = {
       id: `tool-${Date.now()}`,
       role: 'tool',
@@ -149,10 +174,35 @@ export function createFollowUpPrompt(
   result: any, 
   modelType: string
 ): ChatMessage {
-  // Format the result consistently
-  const formattedResult = typeof result === 'string' 
-    ? result 
-    : JSON.stringify(result, null, 2);
+  // Format the result consistently with special handling for Playwright tools
+  let formattedResult = '';
+  
+  // Special handling for browser_navigate and other Playwright tools to extract the actual content
+  if (toolCall.tool === 'browser_navigate' || toolCall.tool.includes('navigate') || toolCall.tool.includes('browser')) {
+    // For navigation tools, extract and format the content properly
+    if (result && result.content) {
+      // If result has content property, use it directly
+      formattedResult = typeof result.content === 'string' 
+        ? result.content 
+        : JSON.stringify(result.content, null, 2);
+    } else if (result && result.html) {
+      // If there's HTML content, use that
+      formattedResult = `Content from ${toolCall.args.url || 'webpage'}:\n\n${result.html}`;
+    } else if (result && result.text) {
+      // If there's text content, use that
+      formattedResult = `Content from ${toolCall.args.url || 'webpage'}:\n\n${result.text}`;
+    } else {
+      // Fallback format
+      formattedResult = typeof result === 'string' 
+        ? result 
+        : JSON.stringify(result, null, 2);
+    }
+  } else {
+    // Default formatting for other tools
+    formattedResult = typeof result === 'string' 
+      ? result 
+      : JSON.stringify(result, null, 2);
+  }
     
   // Handle Anthropic models (Claude) - they need special handling
   if (modelType.includes('anthropic') || modelType.includes('claude')) {

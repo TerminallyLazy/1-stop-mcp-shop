@@ -1,5 +1,5 @@
-import { Navbar } from "@/components/layout/navbar";
-import { ServerManager } from "@/components/server/server-manager";
+import { Navbar } from "../../components/layout/navbar";
+import { ServerManager } from "../../components/server/server-manager";
 
 export default function ManagePage() {
   return (

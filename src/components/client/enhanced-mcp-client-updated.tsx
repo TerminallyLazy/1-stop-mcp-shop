@@ -1,18 +1,32 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { callGeminiAPI } from "@/lib/api/gemini";
-import { callAnthropicAPI } from "@/lib/api/anthropic";
-import { ChatMessage, MCPServer, ToolCall } from "@/lib/types";
-import { listMCPServers } from "@/lib/api/mcp";
-import { getUserSession } from "@/lib/supabase";
+import { useState, useEffect, SetStateAction } from "react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "../../components/ui/dialog";
+import { callGeminiAPI } from "../../lib/api/gemini";
+import { callAnthropicAPI } from "../../lib/api/anthropic";
+import { ChatMessage, MCPServer, ToolCall, MCPTool } from "../../lib/types"; // Added MCPTool here
+import { listMCPServers } from "../../lib/api/mcp";
+import { getUserSession } from "../../lib/supabase";
 import { ChatContainer } from "./chat-container";
-import { processToolCall, createFollowUpPrompt } from "@/lib/utils/tool-handler";
+import { processToolCall, createFollowUpPrompt } from "../../lib/utils/tool-handler";
+
+// Storage key for localStorage
+const MCP_SERVERS_STORAGE_KEY = 'mcp-installed-servers';
+
+interface MCPServerConfig {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+}
+
+// Extended MCPServer interface to include config
+interface ExtendedMCPServer extends MCPServer {
+  config?: MCPServerConfig;
+}
 
 export function EnhancedMCPClientUpdated() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -20,12 +34,17 @@ export function EnhancedMCPClientUpdated() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState("claude-3-sonnet-20240229");
   const [availableServers, setAvailableServers] = useState<MCPServer[]>([]);
-  const [installedServers, setInstalledServers] = useState<MCPServer[]>([]);
+  const [installedServers, setInstalledServers] = useState<ExtendedMCPServer[]>([]);
   const [showServerDialog, setShowServerDialog] = useState(false);
+  const [showServerDetailsDialog, setShowServerDetailsDialog] = useState(false);
+  const [serverDetails, setServerDetails] = useState<ExtendedMCPServer | null>(null);
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCall[]>([]);
   const [userSession, setUserSession] = useState<{user: any, subscription?: string}|null>(null);
   const [serverUrl, setServerUrl] = useState<string>("");
   const [configProcessing, setConfigProcessing] = useState<boolean>(false);
+  const [discoveringServers, setDiscoveringServers] = useState<Record<string, boolean>>({}); // Track discovery status
+  const [dockerDeployPath, setDockerDeployPath] = useState<string>("");
+  const [dockerPort, setDockerPort] = useState<string>("3000");
 
   // Fetch user session and available servers
   useEffect(() => {
@@ -40,14 +59,34 @@ export function EnhancedMCPClientUpdated() {
         setAvailableServers(servers);
         
         // Get installed servers from local storage
-        const storedServers = localStorage.getItem('installedServers');
+        const storedServers = localStorage.getItem(MCP_SERVERS_STORAGE_KEY);
         if (storedServers) {
-          const parsedServers = JSON.parse(storedServers);
-          setInstalledServers(parsedServers);
+          try {
+            const parsedServers = JSON.parse(storedServers);
+            console.log("Loaded servers from localStorage:", parsedServers);
+            
+            // Normalize the servers to ensure all tools have parameters
+            const normalizedServers = parsedServers.map((server: MCPServer) => ({
+              ...server,
+              tools: server.tools.map((tool: any) => ({
+                ...tool,
+                parameters: tool.parameters || []
+              }))
+            }));
+            
+            setInstalledServers(normalizedServers);
+          } catch (error) {
+            console.error("Error parsing stored servers:", error);
+            // If there's an error, fallback to available servers
+            if (servers.length > 0) {
+              setInstalledServers([servers[0]]);
+              localStorage.setItem(MCP_SERVERS_STORAGE_KEY, JSON.stringify([servers[0]]));
+            }
+          }
         } else if (servers.length > 0) {
           // If no stored servers, use the first one as default
           setInstalledServers([servers[0]]);
-          localStorage.setItem('installedServers', JSON.stringify([servers[0]]));
+          localStorage.setItem(MCP_SERVERS_STORAGE_KEY, JSON.stringify([servers[0]]));
         }
       } catch (error) {
         console.error("Error initializing client:", error);
@@ -56,6 +95,109 @@ export function EnhancedMCPClientUpdated() {
 
     fetchUserAndServers();
   }, []);
+
+
+  // Effect to save installed servers to localStorage whenever it changes
+  useEffect(() => {
+    // Only save if we have servers to save
+    if (installedServers.length > 0) {
+      try {
+        // Deduplicate servers by ID before saving
+        const uniqueServers = [];
+        const seenIds = new Set();
+        
+        for (const server of installedServers) {
+          if (!seenIds.has(server.id)) {
+            seenIds.add(server.id);
+            uniqueServers.push(server);
+          }
+        }
+        
+        localStorage.setItem(MCP_SERVERS_STORAGE_KEY, JSON.stringify(uniqueServers));
+        console.log("Saved installedServers to localStorage:", uniqueServers);
+        
+        // If we had duplicates, update the state
+        if (uniqueServers.length !== installedServers.length) {
+          console.log(`Removed ${installedServers.length - uniqueServers.length} duplicate servers`);
+          setInstalledServers(uniqueServers);
+        }
+      } catch (error) {
+        console.error("Error saving servers to localStorage:", error);
+      }
+    }
+  }, [installedServers]);
+
+  // Effect to trigger discovery for newly added servers that need it
+  useEffect(() => {
+    // Create a Set of servers that are currently being discovered
+    const currentlyDiscovering = new Set(
+      Object.entries(discoveringServers)
+        .filter(([_, value]) => value)
+        .map(([key, _]) => key)
+    );
+    
+    // Track if we've initiated any discoveries in this effect cycle
+    let discoveryInitiated = false;
+    
+    // Create a state update function to avoid race conditions
+    const updatesToMake: Record<string, boolean> = {};
+    
+    installedServers.forEach(server => {
+      // Skip if discovery is already in progress for this server
+      if (currentlyDiscovering.has(server.id)) {
+        return;
+      }
+      
+      // Skip if this server already has tools
+      if (server.tools.length > 0) {
+        return;
+      }
+      
+      // Check if server is eligible for discovery (has config or is URL-based)
+      const needsDiscovery = ('config' in server && !!server.config) || server.id.startsWith('url-');
+      
+      // Skip if already being discovered (additional safety check)
+      if (needsDiscovery && !discoveringServers[server.id]) {
+        // Limit to one discovery per effect cycle to avoid overwhelming the UI
+        if (!discoveryInitiated) {
+          console.log(`Triggering discovery for server ID: ${server.id} from useEffect`);
+          updatesToMake[server.id] = true;
+          discoveryInitiated = true;
+          
+          // We'll start discovery outside the loop to avoid React state update issues
+        }
+      }
+    });
+    
+    // Apply all state updates at once
+    if (Object.keys(updatesToMake).length > 0) {
+      // Update the discovering state first
+      setDiscoveringServers(prev => ({
+        ...prev,
+        ...updatesToMake
+      }));
+      
+      // Then trigger the actual discovery for the first server we marked
+      const serverId = Object.keys(updatesToMake)[0];
+      const serverToDiscover = installedServers.find(s => s.id === serverId);
+      
+      if (serverToDiscover) {
+        // Use a small timeout to ensure state updates have processed
+        setTimeout(() => {
+          discoverServerTools(serverToDiscover);
+        }, 100);
+      }
+    }
+    
+    // Dependency array includes installedServers to re-run when servers are added/removed
+    // discoveringServers is included to avoid re-triggering while discovery is in progress
+  }, [installedServers, discoveringServers]);
+
+  // Handler to view server details
+  const handleViewServerDetails = (server: ExtendedMCPServer) => {
+    setServerDetails(server);
+    setShowServerDetailsDialog(true);
+  };
 
   // Helper function to detect tool calls in the assistant response
   const detectToolCalls = (content: string, servers: MCPServer[]): ToolCall[] => {
@@ -99,7 +241,7 @@ export function EnhancedMCPClientUpdated() {
             
             // Find the server that has this tool
             const serverWithTool = servers.find(server => 
-              server.tools.some(tool => tool.name === toolName)
+              server.tools.some((tool: { name: any; }) => tool.name === toolName)
             );
             
             if (serverWithTool) {
@@ -139,13 +281,13 @@ export function EnhancedMCPClientUpdated() {
         
         // Find the server that has this tool
         const serverWithTool = servers.find(server => 
-          server.tools.some(tool => tool.name === toolName || 
+          server.tools.some((tool: { name: string; }) => tool.name === toolName || 
                                    tool.name === `get_${toolName}`)
         );
         
         if (serverWithTool) {
           // Find the exact tool
-          const exactToolName = serverWithTool.tools.find(t => 
+          const exactToolName = serverWithTool.tools.find((t: { name: string; }) => 
             t.name === toolName || t.name === `get_${toolName}`
           )?.name || toolName;
           
@@ -169,11 +311,11 @@ export function EnhancedMCPClientUpdated() {
         
         // Find the server that has this tool
         const serverWithTool = servers.find(server => 
-          server.tools.some(tool => tool.name === toolName)
+          server.tools.some((tool: { name: string; }) => tool.name === toolName)
         );
         
         if (serverWithTool) {
-          const tool = serverWithTool.tools.find(t => t.name === toolName);
+          const tool = serverWithTool.tools.find((t: { name: string; }) => t.name === toolName);
           
           if (tool) {
             // Parse parameters from the string
@@ -204,16 +346,16 @@ export function EnhancedMCPClientUpdated() {
     // Weather pattern - as fallback for any weather related queries
     if (toolCalls.length === 0 && 
         content.toLowerCase().includes('weather') && 
-        servers.some(server => server.tools.some(tool => 
+        servers.some(server => server.tools.some((tool: { name: string | string[]; }) => 
           tool.name.includes('weather') || tool.name.includes('get_weather')
         ))) {
       
       const weatherServer = servers.find(server => 
-        server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+        server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('weather') || tool.name.includes('get_weather'))
       );
       
       if (weatherServer) {
-        const weatherTool = weatherServer.tools.find(tool => 
+        const weatherTool = weatherServer.tools.find((tool: { name: string | string[]; }) => 
           tool.name.includes('weather') || tool.name.includes('get_weather')
         );
         
@@ -292,11 +434,11 @@ export function EnhancedMCPClientUpdated() {
 ${installedServers.map(server => `
 Server: ${server.name}
 Description: ${server.description}
-Tools: ${server.tools.map(tool => tool.name).join(', ')}
+Tools: ${server.tools.map((tool: { name: any; }) => tool.name).join(', ')}
 
-${server.tools.map(tool => `Tool: ${tool.name}
+${server.tools.map((tool: { name: any; description: any; parameters: any[]; }) => `Tool: ${tool.name}
 Description: ${tool.description}
-Parameters: ${tool.parameters.map(p => `${p.name} (${p.type}${p.required ? ', required' : ''})`).join(', ')}
+Parameters: ${tool.parameters.map((p: { name: any; type: any; required: any; }) => `${p.name} (${p.type}${p.required ? ', required' : ''})`).join(', ')}
 `).join('\n')}
 `).join('\n')}
 
@@ -333,8 +475,8 @@ IMPORTANT: After using a tool once, just respond to the information without maki
           role: 'user',
           content: `You are a helpful assistant that can have natural conversations with users. You can use tools when appropriate to get information needed to answer questions.
 
-Available tools: ${installedServers.map(server => 
-            server.tools.map(tool => `${tool.name} - ${tool.description}`).join(', ')
+Available tools: ${installedServers.map(server =>
+            server.tools.map((tool: { name: any; description: any; }) => `${tool.name} - ${tool.description}`).join(', ')
           ).join('. ')}
 
 When you need to use a tool, format it like this:
@@ -369,7 +511,20 @@ User message: ${userMessage.content}`,
           createdAt: new Date().toISOString()
         };
         
-        response = await callGeminiAPI([userInstruction], selectedModel);
+        // Convert previous conversation history to a format suitable for Gemini
+        const conversationHistory = messages.map(msg => {
+          if (msg.role === 'user') {
+            return { ...msg, content: `User: ${msg.content}`};
+          } else if (msg.role === 'assistant') {
+            return { ...msg, content: `Assistant: ${msg.content}`};
+          } else if (msg.role === 'tool') {
+            return { ...msg, content: `Tool Result: ${msg.content}`};
+          }
+          return msg;
+        });
+        
+        // Include conversation history for context
+        response = await callGeminiAPI([...conversationHistory, userInstruction], selectedModel);
       } else if (selectedModel.includes('claude')) {
         response = await callAnthropicAPI([...messages, systemMessage, userMessage], selectedModel);
       } else {
@@ -421,11 +576,11 @@ User message: ${userMessage.content}`,
             
             if (location) {
               const weatherServer = installedServers.find(server => 
-                server.tools.some(tool => tool.name.includes('weather') || tool.name.includes('get_weather'))
+                server.tools.some((tool: { name: string | string[]; }) => tool.name.includes('weather') || tool.name.includes('get_weather'))
               );
               
               if (weatherServer) {
-                const weatherTool = weatherServer.tools.find(tool => 
+                const weatherTool = weatherServer.tools.find((tool: { name: string | string[]; }) => 
                   tool.name.includes('weather') || tool.name.includes('get_weather')
                 );
                 
@@ -443,10 +598,11 @@ User message: ${userMessage.content}`,
                       toolCall, 
                       installedServers,
                       setActiveToolCalls,
-                      (message) => setMessages(prev => [...prev, message]),
-                      async (toolCall, result) => {
-                        await generateFollowUpResponse(toolCall, result);
-                      }
+                      (message: any) => setMessages(prev => [...prev, message]),
+                      async (toolCall: any, result: any) => {
+                        await generateFollowUpResponse(toolCall, result, selectedModel);
+                      },
+                      selectedModel
                     );
                   } catch (error) {
                     console.error("Error processing emergency tool call:", error);
@@ -481,10 +637,11 @@ User message: ${userMessage.content}`,
                 toolCalls[0], 
                 installedServers,
                 setActiveToolCalls,
-                (message) => setMessages(prev => [...prev, message]),
-                async (toolCall, result) => {
-                  await generateFollowUpResponse(toolCall, result);
-                }
+                (message: any) => setMessages(prev => [...prev, message]),
+                async (toolCall: any, result: any) => {
+                  await generateFollowUpResponse(toolCall, result, selectedModel);
+                },
+                selectedModel
               );
             } catch (error) {
               console.error("Error processing tool call:", error);
@@ -526,7 +683,7 @@ User message: ${userMessage.content}`,
     }
   };
 
-  const generateFollowUpResponse = async (toolCall: ToolCall, result: any) => {
+  const generateFollowUpResponse = async (toolCall: ToolCall, result: any, selectedModel: string) => {
     console.log(`Generating follow-up response for tool call ${toolCall.id}`);
     
     try {
@@ -608,26 +765,227 @@ User message: ${userMessage.content}`,
   const handleInstallServer = (server: MCPServer) => {
     // Add the server to installed servers
     setInstalledServers(prev => {
-      // Check if already installed
-      if (prev.some(s => s.id === server.id)) {
+      // Check if already installed by ID or name
+      const isAlreadyInstalled = prev.some(s => s.id === server.id || s.name === server.name);
+      
+      if (isAlreadyInstalled) {
+        // Show a message to the user that the server is already installed
+        const alreadyInstalledMessage: ChatMessage = {
+          id: `system-already-installed-${server.id}-${Date.now()}`,
+          content: `Server "${server.name}" is already installed.`,
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prevMessages => [...prevMessages, alreadyInstalledMessage]);
         return prev;
       }
       
-      const newInstalledServers = [...prev, server];
-      // Save to local storage
-      localStorage.setItem('installedServers', JSON.stringify(newInstalledServers));
+      // Make a copy with normalized tools (ensure parameters exist)
+      const normalizedServer = {
+        ...server,
+        tools: server.tools.map(tool => ({
+          ...tool,
+          parameters: tool.parameters || []
+        }))
+      };
+      
+      // Create a unique array of servers to avoid duplicates
+      const newInstalledServers = [...prev, normalizedServer];
+      
+      // Add a message about the server's tools
+      const toolMessage: ChatMessage = {
+        id: `system-added-${server.id}-${Date.now()}`,
+        content: `Added server configuration for "${server.name}". ${server.tools.length > 0 ? 
+          `Available tools: ${server.tools.map((t: any) => t.name).join(', ')}` : 
+          "Attempting to discover tools..."}`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, toolMessage]);
       
       return newInstalledServers;
+      // Note: The useEffect will handle saving to localStorage and deduplication
     });
     
     setShowServerDialog(false);
+    // Discovery is triggered by the useEffect hook watching installedServers
   };
+
+  // --- Updated Function: Discover Server Tools ---
+  // Now accepts the full server object
+  const discoverServerTools = async (serverToDiscover: ExtendedMCPServer) => {
+     const serverId = serverToDiscover.id;
+     console.log(`discoverServerTools called for server ID: ${serverId}`);
+     setDiscoveringServers(prev => ({ ...prev, [serverId]: true }));
+
+    // Add connecting message with a more unique ID
+     const connectingMessage: ChatMessage = {
+      id: `system-discovery-${serverId}-${Date.now()}`, // Added serverId
+      content: `Attempting to connect and discover tools for server "${serverToDiscover.name}"...`,
+      role: "system",
+      createdAt: new Date().toISOString()
+    };
+    setMessages(prev => [...prev, connectingMessage]);
+
+    try {
+      // --- Actual Discovery via Backend API ---
+      let requestBody: any;
+      let serverUrlForDiscovery: string | undefined;
+
+      // Determine request type and data based on server info
+      if ('config' in serverToDiscover && serverToDiscover.config) {
+        requestBody = {
+          type: 'config',
+          config: serverToDiscover.config,
+          serverId: serverId,
+        };
+      } else if (serverToDiscover.id.startsWith('url-')) {
+         // Extract URL from description (adjust if stored differently)
+         const urlMatch = serverToDiscover.description?.match(/MCP Server at (https?:\/\/[^\s]+)/);
+         if (urlMatch && urlMatch[1]) {
+            serverUrlForDiscovery = urlMatch[1];
+            // Ensure the URL doesn't end with a trailing slash which can cause issues
+            serverUrlForDiscovery = serverUrlForDiscovery.replace(/\/+$/, '');
+            
+            // For Docker servers, make sure we're using the server port not web UI port
+            if (serverToDiscover.id.startsWith('url-docker-') && serverUrlForDiscovery.includes('localhost')) {
+              // Add /mcp endpoint which is the standard for MCP servers
+              if (!serverUrlForDiscovery.endsWith('/mcp')) {
+                serverUrlForDiscovery = `${serverUrlForDiscovery}/mcp`;
+              }
+            }
+            
+            requestBody = {
+              type: 'url',
+              url: serverUrlForDiscovery,
+              serverId: serverId,
+            };
+         } else {
+            throw new Error(`Could not extract URL from server description: ${serverToDiscover.description}`);
+         }
+      } else {
+         // Maybe it's a marketplace server that somehow lost its tools? Or an unknown type.
+         console.warn(`Server ${serverId} does not have config and is not URL-based. Skipping discovery.`);
+         // Optionally, set discovery as finished without error
+         setDiscoveringServers(prev => ({ ...prev, [serverId]: false }));
+         // Remove the "Attempting to connect..." message? Or add a "Skipping discovery..." message?
+         // Let's remove the connecting message for now if we skip.
+         setMessages(prev => prev.filter(msg => msg.id !== connectingMessage.id));
+         return; // Exit discovery for this server
+      }
+
+      console.log(`Sending discovery request to /api/mcp/discover for server ${serverId}`);
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Connection timed out after 10 seconds.")), 10000);
+      });
+
+      const fetchPromise = fetch('/api/mcp/discover', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      // Use Promise.race to implement a timeout
+      const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+
+      // Check if we need to abort the request due to timeout
+      if (!response.ok && response.status === 0) {
+        throw new Error("Connection timeout or network error.");
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        // Throw error using the message from the backend response if available
+        throw new Error(result.error || `API request failed with status ${response.status}`);
+      }
+
+      // Ensure the response has the expected 'tools' array
+      if (!result || !Array.isArray(result.tools)) {
+        throw new Error('Invalid response format from discovery API.');
+      }
+
+      const discoveredTools: MCPTool[] = result.tools;
+      console.log(`Received ${discoveredTools.length} tools for server ${serverId} from API.`);
+      // --- End Actual Discovery ---
+
+      // Update the server in the state with discovered tools
+      setInstalledServers(prev => {
+        // Map over previous state to update the specific server
+        const updatedServers = prev.map(s =>
+          s.id === serverId ? {
+            ...s,
+            // Ensure each tool has a parameters array
+            tools: discoveredTools.map(tool => ({
+              ...tool,
+              parameters: tool.parameters || []
+            }))
+          } : s
+        );
+        // Return the new state. localStorage saving is handled by the useEffect hook.
+        return updatedServers;
+      });
+
+      // Add success message with a more unique ID
+      const toolCount = discoveredTools.length;
+      const discoverySuccessMessage: ChatMessage = {
+        id: `system-discovered-${serverId}-${Date.now()}`, // Added serverId
+        content: `Successfully connected to "${serverToDiscover.name}". Discovered ${toolCount} ${toolCount === 1 ? 'tool' : 'tools'}: ${discoveredTools.map(t => t.name).join(', ')}.`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, discoverySuccessMessage]);
+
+    } catch (error) {
+      console.error(`Error discovering tools for server ${serverId}:`, error);
+      
+      // Create a user-friendly error message
+      let errorMessage = error instanceof Error ? error.message : String(error);
+      let userFriendlyMsg = errorMessage;
+      
+      // Detect HTML response error
+      if (errorMessage.includes('regular web server') || 
+          errorMessage.includes('HTML instead of') || 
+          errorMessage.includes('<!DOCTYPE') ||
+          errorMessage.includes('Unexpected token')) {
+        userFriendlyMsg = `The Docker container at this URL is running a regular web server (not an MCP server). It's serving HTML pages instead of responding to MCP protocol requests. Check the port and make sure your container implements the Model Context Protocol.`;
+      }
+      
+      // Add error message with a more unique ID
+      const discoveryErrorMessage: ChatMessage = {
+        id: `system-discovery-error-${serverId}-${Date.now()}`, // Added serverId
+        content: `Failed to connect or discover tools for server "${serverToDiscover.name}": ${userFriendlyMsg}`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, discoveryErrorMessage]);
+      
+      // Create a sample MCP server message
+      if (serverToDiscover.id.startsWith('url-docker-')) {
+        const sampleMessage: ChatMessage = {
+          id: `system-sample-${serverId}-${Date.now()}`,
+          content: `This issue is because Docker deployments created through this interface are basic static web servers, not MCP-compatible servers. Currently, you'll need to deploy a proper MCP server separately.`,
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, sampleMessage]);
+      }
+    } finally {
+      // Always mark discovery as complete to avoid any stuck states
+      setDiscoveringServers(prev => ({ ...prev, [serverId]: false }));
+    }
+  };
+  // --- End New Function ---
+
 
   const handleRemoveServer = (serverId: string) => {
     setInstalledServers(prev => {
       const newInstalledServers = prev.filter(server => server.id !== serverId);
       // Save to local storage
-      localStorage.setItem('installedServers', JSON.stringify(newInstalledServers));
+      localStorage.setItem(MCP_SERVERS_STORAGE_KEY, JSON.stringify(newInstalledServers));
       
       return newInstalledServers;
     });
@@ -671,52 +1029,111 @@ User message: ${userMessage.content}`,
         return;
       }
       
-      // Create a proper MCPServer object
-      const now = new Date().toISOString();
-      const server: MCPServer = {
-        id: serverConfig.id || `imported-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        name: serverConfig.name || "Imported Server",
-        description: serverConfig.description || "Imported from configuration file",
-        ownerId: userSession?.user?.id || 'anonymous',
-        createdAt: serverConfig.created_at || now,
-        updatedAt: serverConfig.updated_at || now,
-        isPublic: serverConfig.is_public || false,
-        expiresAt: serverConfig.expires_at,
-        tools: serverConfig.tools?.map((tool: any) => ({
-          id: tool.id || `tool-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-          name: tool.name,
-          description: tool.description || `Tool for ${tool.name}`,
-          parameters: tool.parameters || [],
-          serverId: serverConfig.id,
-          createdAt: tool.created_at || now,
-          updatedAt: tool.updated_at || now
-        })) || [],
-        resources: serverConfig.resources || [],
-        prompts: serverConfig.prompts || [],
-        schemaVersion: serverConfig.schema_version || "2025-03-26",
-        transportTypes: serverConfig.transport_types || ["sse", "stdio"],
-        capabilities: serverConfig.capabilities || {
-          tools: (serverConfig.tools?.length || 0) > 0,
-          resources: (serverConfig.resources?.length || 0) > 0,
-          prompts: (serverConfig.prompts?.length || 0) > 0,
-          sampling: false
-        }
-      };
+      // Track servers being processed from this config file
+      const configServerNames = new Set<string>(Object.keys(serverConfig.mcpServers));
       
-      // Add the server to installed servers
-      handleInstallServer(server);
+      // Find existing servers that came from config files
+      setInstalledServers(prev => {
+        // Get all servers not coming from this config file
+        const otherServers = prev.filter(s => {
+          // Keep servers that aren't imported or have different names than what's in this config
+          return !s.id.startsWith('imported-') || !configServerNames.has(s.name);
+        });
+        
+        // Create a map of existing servers by name for easy lookup (including non-imported servers)
+        const existingServersByName = new Map<string, ExtendedMCPServer>();
+        prev.forEach(server => {
+          if (server.name) {
+            existingServersByName.set(server.name, server);
+          }
+        });
+        
+        // Process each server in the new config
+        const updatedAndNewServers: ExtendedMCPServer[] = [];
+        
+        Object.entries<MCPServerConfig>(serverConfig.mcpServers).forEach(([serverName, config]) => {
+          const now = new Date().toISOString();
+          // Ensure args is always an array
+          const args = config.args && Array.isArray(config.args) ? config.args : [];
+          
+          // Check if this server already exists by name
+          const existingServer = existingServersByName.get(serverName);
+          
+          if (existingServer) {
+            // Server exists - update config but keep existing tools if any
+            updatedAndNewServers.push({
+              ...existingServer,
+              description: `MCP Server using ${config.command}`,
+              updatedAt: now,
+              config: {
+                command: config.command,
+                args: config.args,
+                env: config.env
+              }
+            });
+            
+            console.log(`Updated existing server: ${serverName}`);
+          } else {
+            // Create a new server
+            updatedAndNewServers.push({
+              id: `imported-${serverName}-${Date.now()}`,
+              name: serverName,
+              description: `MCP Server using ${config.command}`,
+              ownerId: userSession?.user?.id || 'anonymous',
+              createdAt: now,
+              updatedAt: now,
+              isPublic: false,
+              tools: [], // Initialize with empty tools; discovery will populate this
+              resources: [],
+              prompts: [],
+              schemaVersion: "2025-03-26",
+              transportTypes: ["sse", "stdio"],
+              capabilities: {
+                tools: true,
+                resources: false,
+                prompts: false,
+                sampling: false
+              },
+              config: {
+                command: config.command,
+                args: config.args,
+                env: config.env
+              }
+            });
+            
+            console.log(`Added new server: ${serverName}`);
+          }
+        });
+        
+        // Create a final deduplicated list
+        const allServers = [...otherServers, ...updatedAndNewServers];
+        
+        // Ensure no duplicates by ID
+        const uniqueServers = [];
+        const seenIds = new Set();
+        
+        for (const server of allServers) {
+          if (!seenIds.has(server.id)) {
+            seenIds.add(server.id);
+            uniqueServers.push(server);
+          }
+        }
+        
+        console.log(`Config processing complete: ${uniqueServers.length} servers (${updatedAndNewServers.length} from config)`);
+        return uniqueServers;
+      });
       
       // Reset the file input
       event.target.value = "";
       
-      // Add success message
-      const successMessage: ChatMessage = {
-        id: `system-${Date.now()}`,
-        content: `Successfully imported MCP server "${server.name}" with ${server.tools.length} tools.`,
+      // Add a message confirming the config processing
+      const importSuccessMessage: ChatMessage = {
+        id: `system-import-${Date.now()}`,
+        content: `Successfully processed configuration file. MCP servers have been updated. Tool discovery will begin for new servers.`,
         role: "system",
         createdAt: new Date().toISOString()
       };
-      setMessages(prev => [...prev, successMessage]);
+      setMessages(prev => [...prev, importSuccessMessage]);
       
     } catch (error) {
       console.error("Error processing config file:", error);
@@ -734,19 +1151,17 @@ User message: ${userMessage.content}`,
   
   const validateMCPServerConfig = (config: any): boolean => {
     // Basic validation to ensure it's a valid MCP server configuration
-    if (!config) return false;
+    if (!config || typeof config !== 'object') return false;
     
-    // Check for essential properties
-    if (!config.name) return false;
+    // Check for mcpServers object
+    if (!config.mcpServers || typeof config.mcpServers !== 'object') return false;
     
-    // Check for tools array
-    if (config.tools && !Array.isArray(config.tools)) return false;
-    
-    // Validate tools if they exist
-    if (config.tools && Array.isArray(config.tools)) {
-      for (const tool of config.tools) {
-        if (!tool.name) return false;
-      }
+    // Validate each server configuration
+    for (const [serverName, serverConfig] of Object.entries<MCPServerConfig>(config.mcpServers)) {
+      if (typeof serverConfig !== 'object') return false;
+      if (!serverConfig.command || typeof serverConfig.command !== 'string') return false;
+      if (!serverConfig.args || !Array.isArray(serverConfig.args)) return false;
+      if (serverConfig.env && typeof serverConfig.env !== 'object') return false;
     }
     
     return true;
@@ -764,12 +1179,135 @@ User message: ${userMessage.content}`,
       
       const validUrl = new URL(url);
       
-      // Create a server object from the URL
-      const serverId = validUrl.pathname.split('/').pop() || `url-${Date.now()}`;
-      const server: MCPServer = {
+      // Check if we already have this URL in installedServers
+      // Also normalize the URL for comparison
+      const normalizedUrl = url.trim().toLowerCase().replace(/\/+$/, ''); // Remove trailing slashes
+      
+      // More thorough check for duplicates by comparing normalized URLs
+      const urlExists = installedServers.some(server => {
+        if (!server.description) return false;
+        
+        // Extract URL from description if it exists
+        const urlMatch = server.description.match(/MCP Server at (https?:\/\/[^\s]+)/i);
+        if (!urlMatch || !urlMatch[1]) return false;
+        
+        // Normalize the stored URL for comparison
+        const storedUrl = urlMatch[1].trim().toLowerCase().replace(/\/+$/, '');
+        
+        // Compare normalized URLs
+        return storedUrl === normalizedUrl ||
+               storedUrl === `http://${normalizedUrl}` ||
+               storedUrl === `https://${normalizedUrl}` ||
+               `http://${storedUrl}` === normalizedUrl ||
+               `https://${storedUrl}` === normalizedUrl;
+      });
+      
+      if (urlExists) {
+        const duplicateMessage: ChatMessage = {
+          id: `system-duplicate-${Date.now()}`,
+          content: `A server with URL ${url} is already installed.`,
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, duplicateMessage]);
+        setServerUrl("");
+        return;
+      }
+      
+      // Show connecting message
+      const connectingMessage: ChatMessage = {
+        id: `system-connecting-${Date.now()}`,
+        content: `Connecting to MCP server at ${url}...`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, connectingMessage]);
+      
+      // Attempt to fetch server metadata (this would be a real API call in production)
+      try {
+        // In a real implementation, we would fetch server metadata from the URL
+        // For now, we'll simulate a successful connection with a timeout
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Create a server object from the URL
+        // Use a more predictable ID based on the hostname
+        const serverId = `url-${validUrl.hostname}-${Date.now()}`;
+        const server: ExtendedMCPServer = {
+          id: serverId,
+          name: `Server at ${validUrl.hostname}`,
+          description: `MCP Server at ${url}`,
+          ownerId: userSession?.user?.id || 'anonymous',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          isPublic: false, // Assuming URL-added servers are private by default
+          tools: [], // Initialize with empty tools; discovery will populate this
+          resources: [], // Assuming resources are not handled by URL import for now
+          prompts: [],   // Assuming prompts are not handled by URL import for now
+          schemaVersion: "2025-03-26",
+          transportTypes: ["sse", "stdio"],
+          capabilities: {
+            tools: true,
+            resources: false,
+            prompts: false,
+            sampling: false
+          }
+        };
+        
+        // Add the server configuration to state. Discovery will be triggered by useEffect.
+        setInstalledServers(prev => [...prev, server]);
+
+        // Reset the URL input
+        setServerUrl("");
+
+        // Add initial success message. Discovery messages will follow.
+        const addUrlSuccessMessage: ChatMessage = {
+          id: `system-url-add-${server.id}-${Date.now()}`, // More unique ID
+          content: `Added server configuration from ${url}. Tool discovery will begin shortly.`,
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, addUrlSuccessMessage]);
+
+      } catch (connectionError) { // This catch block handles errors during the *initial* setup (e.g., metadata fetch simulation)
+        console.error("Error during initial URL processing (not connection/discovery):", connectionError);
+        const processingErrorMessage: ChatMessage = { // Corrected variable name
+          id: `system-url-error-${Date.now()}`, // Use a distinct ID
+          content: `Error processing server URL ${url}. Error: ${connectionError instanceof Error ? connectionError.message : String(connectionError)}`,
+          role: "system",
+          createdAt: new Date().toISOString()
+        };
+        setMessages(prev => [...prev, processingErrorMessage]); // Use the correct variable
+      }
+    } catch (error) { // This outer catch handles URL validation errors
+      console.error("Error adding server URL:", error);
+      const errorMessage: ChatMessage = {
+        id: `system-${Date.now()}`,
+        content: "Invalid URL format. Please enter a valid URL.",
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  // Add a new handler for Docker servers with improved functionality
+  const handleDockerServerAdd = async () => {
+    if (!dockerDeployPath.trim()) return;
+    
+    try {
+      // Extract folder name to use as server name
+      const pathParts = dockerDeployPath.trim().split('/');
+      const folderName = pathParts[pathParts.length - 1];
+      
+      // Use the user-provided port
+      const port = dockerPort || "3000";
+      
+      // Create a server entry for the Docker deployment with the specified port
+      const serverId = `url-docker-${Date.now()}`;
+      const server: ExtendedMCPServer = {
         id: serverId,
-        name: `Server at ${validUrl.hostname}`,
-        description: `MCP Server at ${url}`,
+        name: `Docker: ${folderName}`,
+        description: `MCP Server at http://localhost:${port}/mcp`,
         ownerId: userSession?.user?.id || 'anonymous',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -778,7 +1316,7 @@ User message: ${userMessage.content}`,
         resources: [],
         prompts: [],
         schemaVersion: "2025-03-26",
-        transportTypes: ["sse", "stdio"],
+        transportTypes: ["sse", "http"],
         capabilities: {
           tools: true,
           resources: false,
@@ -788,29 +1326,64 @@ User message: ${userMessage.content}`,
       };
       
       // Add the server to installed servers
-      handleInstallServer(server);
+      setInstalledServers(prev => [...prev, server]);
       
-      // Reset the URL input
-      setServerUrl("");
+      // Clear the input fields
+      setDockerDeployPath("");
+      setDockerPort("3000");
       
-      // Add success message
-      const successMessage: ChatMessage = {
-        id: `system-${Date.now()}`,
-        content: `Successfully added MCP server at ${url}`,
+      // Close the dialog
+      setShowServerDialog(false);
+      
+      // Add a message about the added server
+      const dockerAddMessage: ChatMessage = {
+        id: `system-docker-${Date.now()}`,
+        content: `Added Docker server from ${dockerDeployPath} with port ${port}. Starting connection...`,
         role: "system",
         createdAt: new Date().toISOString()
       };
-      setMessages(prev => [...prev, successMessage]);
+      setMessages(prev => [...prev, dockerAddMessage]);
+      
+      // Add info message about MCP server requirements
+      const infoMessage: ChatMessage = {
+        id: `system-docker-info-${Date.now()}`,
+        content: `Note: Make sure your Docker container runs an actual MCP-compatible server that responds to JSON-RPC requests. A static web server like Nginx alone won't work.`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, infoMessage]);
+      
+      // Add a message with instructions on how to handle error or remove server
+      const helpMessage: ChatMessage = {
+        id: `system-docker-remove-help-${Date.now()}`,
+        content: `If you encounter "HTML instead of JSON" errors, it means your Docker container is not an MCP server. You can remove the server by clicking on it in the sidebar and then "Remove".`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, helpMessage]);
+      
+      // Try to discover tools for this server - discovery will be triggered by the useEffect
+      // Do NOT manually trigger discovery here to avoid infinite loops
+      setDiscoveringServers(prev => ({ ...prev, [server.id]: true }));
       
     } catch (error) {
-      console.error("Error adding server URL:", error);
+      console.error("Error adding Docker server:", error);
       const errorMessage: ChatMessage = {
-        id: `system-${Date.now()}`,
-        content: "Invalid URL format. Please enter a valid URL.",
+        id: `system-docker-error-${Date.now()}`,
+        content: `Error adding Docker server: ${error instanceof Error ? error.message : String(error)}`,
         role: "system",
         createdAt: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMessage]);
+      
+      // Add a helpful message for manual URL addition
+      const helpMessage: ChatMessage = {
+        id: `system-docker-help-${Date.now()}`,
+        content: `You can add your Docker server manually using the URL option with http://localhost:PORT/mcp. Your Docker container must implement the Model Context Protocol and respond to JSON-RPC requests.`,
+        role: "system",
+        createdAt: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, helpMessage]);
     }
   };
 
@@ -828,139 +1401,32 @@ User message: ${userMessage.content}`,
             <CardContent>
               <div className="space-y-2">
                 {installedServers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No servers installed</p>
+                  <div className="text-center text-muted-foreground py-4">
+                    No servers installed
+                  </div>
                 ) : (
-                  installedServers.map(server => (
-                    <div key={server.id} className="flex items-center justify-between border rounded-lg p-2">
-                      <div>
-                        <div className="font-medium text-sm">{server.name}</div>
-                        <div className="text-xs text-muted-foreground">{server.tools.length} tools</div>
+                  installedServers.map((server) => (
+                    <Button
+                      key={server.id}
+                      variant="outline"
+                      className="w-full justify-start"
+                      onClick={() => handleViewServerDetails(server)}
+                    >
+                      <div className="text-left">
+                        <div className="font-medium">{server.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {server.tools.length} tools
+                        </div>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => handleRemoveServer(server.id)}
-                        className="h-6 w-6 p-0"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <path d="M18 6 6 18" />
-                          <path d="m6 6 12 12" />
-                        </svg>
-                        <span className="sr-only">Remove</span>
-                      </Button>
-                    </div>
+                    </Button>
                   ))
                 )}
               </div>
             </CardContent>
             <CardFooter>
-              <Dialog open={showServerDialog} onOpenChange={setShowServerDialog}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="w-full">
-                    Add Server
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add MCP Server</DialogTitle>
-                    <DialogDescription>
-                      Add a server to your MCP Client
-                    </DialogDescription>
-                  </DialogHeader>
-                  
-                  <Tabs defaultValue="marketplace" className="w-full">
-                    <TabsList className="grid grid-cols-3 mb-4">
-                      <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
-                      <TabsTrigger value="config">Config File</TabsTrigger>
-                      <TabsTrigger value="url">URL</TabsTrigger>
-                    </TabsList>
-                    
-                    <TabsContent value="marketplace" className="py-2">
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                        {availableServers.map(server => (
-                          <div 
-                            key={server.id} 
-                            className="flex justify-between items-center border rounded-lg p-3 hover:bg-muted/50 cursor-pointer"
-                            onClick={() => handleInstallServer(server)}
-                          >
-                            <div>
-                              <div className="font-medium">{server.name}</div>
-                              <div className="text-sm text-muted-foreground">{server.description}</div>
-                            </div>
-                            <Button size="sm">Install</Button>
-                          </div>
-                        ))}
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="config" className="py-2">
-                      <div className="space-y-4">
-                        <div className="text-sm text-muted-foreground mb-2">
-                          Upload an MCP configuration file (mcp_config.json)
-                        </div>
-                        
-                        <div className="flex items-center justify-center w-full">
-                          <label htmlFor="mcp-config-upload" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-muted/30 hover:bg-muted/50">
-                            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                              <svg className="w-8 h-8 mb-3 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                              </svg>
-                              <p className="mb-2 text-sm text-muted-foreground">Click to upload or drag and drop</p>
-                              <p className="text-xs text-muted-foreground">JSON file (max 10MB)</p>
-                            </div>
-                            <input 
-                              id="mcp-config-upload" 
-                              type="file" 
-                              accept=".json" 
-                              className="hidden" 
-                              onChange={handleConfigFileUpload}
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="url" className="py-2">
-                      <div className="space-y-4">
-                        <div className="text-sm text-muted-foreground mb-2">
-                          Enter the URL of an MCP server to add
-                        </div>
-                        
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="https://example.com/api/mcp/server-id"
-                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            value={serverUrl}
-                            onChange={(e) => setServerUrl(e.target.value)}
-                          />
-                          <Button 
-                            onClick={handleServerUrlAdd} 
-                            disabled={!serverUrl}
-                          >
-                            Add
-                          </Button>
-                        </div>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                  
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setShowServerDialog(false)}>Cancel</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <Button variant="outline" className="w-full" onClick={() => setShowServerDialog(true)}>
+                Add Server
+              </Button>
             </CardFooter>
           </Card>
           
@@ -972,66 +1438,58 @@ User message: ${userMessage.content}`,
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="gemini" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="gemini">Gemini</TabsTrigger>
-                  <TabsTrigger value="anthropic">Anthropic</TabsTrigger>
-                </TabsList>
-                <TabsContent value="gemini" className="space-y-2 mt-2">
-                  <Button 
-                    variant={selectedModel === "gemini-2.0-flash" ? "default" : "outline"} 
-                    className="w-full justify-start"
-                    onClick={() => setSelectedModel("gemini-2.0-flash")}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">Gemini 2.0 Flash</div>
-                      <div className="text-xs text-muted-foreground">Google's fastest model</div>
-                    </div>
-                  </Button>
-                  <Button 
-                    variant={selectedModel === "gemini-2.5-pro-exp-03-25" ? "default" : "outline"} 
-                    className="w-full justify-start"
-                    onClick={() => setSelectedModel("gemini-2.5-pro-exp-03-25")}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">Gemini 2.5 Pro</div>
-                      <div className="text-xs text-muted-foreground">Google's most capable model</div>
-                    </div>
-                  </Button>
-                </TabsContent>
-                <TabsContent value="anthropic" className="space-y-2 mt-2">
-                  <Button 
-                    variant={selectedModel === "claude-3-7-sonnet-20250219" ? "default" : "outline"} 
-                    className="w-full justify-start"
-                    onClick={() => setSelectedModel("claude-3-7-sonnet-20250219")}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">Claude 3.7 Sonnet</div>
-                      <div className="text-xs text-muted-foreground">Best for tool usage</div>
-                    </div>
-                  </Button>
-                  <Button 
-                    variant={selectedModel === "claude-3-5-sonnet-20241022" ? "default" : "outline"}
-                    className="w-full justify-start"
-                    onClick={() => setSelectedModel("claude-3-5-sonnet-20241022")}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">Claude 3.5 Sonnet</div>
-                      <div className="text-xs text-muted-foreground">Most powerful Claude model</div>
-                    </div>
-                  </Button>
-                  <Button 
-                    variant={selectedModel === "claude-3-5-haiku-20241022" ? "default" : "outline"}
-                    className="w-full justify-start"
-                    onClick={() => setSelectedModel("claude-3-5-haiku-20241022")}
-                  >
-                    <div className="text-left">
-                      <div className="font-medium">Claude 3.5 Haiku</div>
-                      <div className="text-xs text-muted-foreground">Fastest Claude model</div>
-                    </div>
-                  </Button>
-                </TabsContent>
-              </Tabs>
+              <div className="space-y-2">
+                <Tabs defaultValue="anthropic">
+                  <TabsList className="w-full">
+                    <TabsTrigger value="gemini" className="flex-1">Gemini</TabsTrigger>
+                    <TabsTrigger value="anthropic" className="flex-1">Anthropic</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="gemini" className="mt-2 space-y-2">
+                    <Button 
+                      variant={selectedModel === "gemini-2.0-flash" ? "default" : "outline"} 
+                      className="w-full justify-start"
+                      onClick={() => setSelectedModel("gemini-2.0-flash")}
+                    >
+                      <div className="text-left">
+                        <div className="font-medium">Gemini 2.0 Flash</div>
+                        <div className="text-xs text-muted-foreground">Google's fastest model</div>
+                      </div>
+                    </Button>
+                    <Button 
+                      variant={selectedModel === "gemini-2.5-pro-exp-03-25" ? "default" : "outline"} 
+                      className="w-full justify-start"
+                      onClick={() => setSelectedModel("gemini-2.5-pro-exp-03-25")}
+                    >
+                      <div className="text-left">
+                        <div className="font-medium">Gemini 2.5 Pro</div>
+                        <div className="text-xs text-muted-foreground">Google's most capable model</div>
+                      </div>
+                    </Button>
+                  </TabsContent>
+                  <TabsContent value="anthropic" className="mt-2 space-y-2">
+                    <Button 
+                      variant={selectedModel === "claude-3-7-sonnet-20250219" ? "default" : "outline"} 
+                      className="w-full justify-start"
+                      onClick={() => setSelectedModel("claude-3-7-sonnet-20250219")}
+                    >
+                      <div className="text-left">
+                        <div className="font-medium">Claude 3.7 Sonnet</div>
+                        <div className="text-xs text-muted-foreground">Smartest model</div>
+                      </div>
+                    </Button>
+                    <Button 
+                      variant={selectedModel === "claude-3-5-sonnet-20241022" ? "default" : "outline"} 
+                      className="w-full justify-start"
+                      onClick={() => setSelectedModel("claude-3-5-sonnet-20241022")}
+                    >
+                      <div className="text-left">
+                        <div className="font-medium">Claude 3.5 Sonnet</div>
+                        <div className="text-xs text-muted-foreground">High capability model</div>
+                      </div>
+                    </Button>
+                  </TabsContent>
+                </Tabs>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1044,8 +1502,12 @@ User message: ${userMessage.content}`,
                 Interact with AI using MCP tools
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-grow overflow-y-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>
-              <ChatContainer messages={messages} isLoading={isLoading} />
+            <CardContent className="flex-grow overflow-auto">
+              <ChatContainer 
+                messages={messages} 
+                isLoading={isLoading} 
+                activeToolCalls={activeToolCalls}
+              />
             </CardContent>
             <CardFooter>
               <div className="flex w-full items-center space-x-2">
@@ -1060,10 +1522,7 @@ User message: ${userMessage.content}`,
                     }
                   }}
                 />
-                <Button 
-                  onClick={handleSendMessage}
-                  disabled={isLoading || !input.trim()}
-                >
+                <Button onClick={handleSendMessage} disabled={isLoading || !input.trim()}>
                   Send
                 </Button>
               </div>
@@ -1071,6 +1530,224 @@ User message: ${userMessage.content}`,
           </Card>
         </div>
       </div>
+
+      {/* Server Details Dialog - NEW */}
+      <Dialog open={showServerDetailsDialog} onOpenChange={setShowServerDetailsDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{serverDetails?.name}</DialogTitle>
+            <DialogDescription>
+              {serverDetails?.description}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <h3 className="text-sm font-medium mb-2">Available Tools</h3>
+            <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
+              {serverDetails?.tools.length === 0 ? (
+                <div className="text-center text-muted-foreground py-4">
+                  {discoveringServers[serverDetails?.id || ""] ? (
+                    "Discovering tools..."
+                  ) : (
+                    <div className="space-y-2">
+                      <p>No tools available</p>
+                      {serverDetails?.id.startsWith('url-docker-') && (
+                        <div className="p-3 border border-amber-200 bg-amber-50 dark:bg-amber-950 dark:border-amber-900 rounded-md text-xs mt-2">
+                          <p className="font-medium mb-1">Possible Issue:</p>
+                          <p>Your Docker container may not be an MCP-compatible server. It might be a static web server that doesn't respond to JSON-RPC requests.</p>
+                          <p className="mt-1">Try deploying a proper MCP server with this container instead.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                serverDetails?.tools.map(tool => (
+                  <div key={tool.id} className="border rounded-md p-3">
+                    <h4 className="font-medium">{tool.name}</h4>
+                    <p className="text-sm text-muted-foreground mt-1">{tool.description}</p>
+                    
+                    {tool.parameters?.length > 0 && (
+                      <div className="mt-2">
+                        <h5 className="text-xs font-medium mb-1">Parameters:</h5>
+                        <div className="space-y-1">
+                          {tool.parameters?.map((param, index) => (
+                            <div key={`param-${tool.id || 'unknown'}-${index}`} className="text-xs">
+                              <span className="font-medium">{param.name}</span>
+                              <span className="text-muted-foreground"> ({param.type})</span>
+                              {param.required && <span className="text-red-500">*</span>}
+                              <p className="text-muted-foreground">{param.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            {serverDetails?.connectionDetails && (
+              <div className="mt-4 border rounded-md p-3">
+                <h4 className="text-sm font-medium mb-1">Connection Details</h4>
+                <p className="text-xs text-muted-foreground">
+                  Connected via: {serverDetails.connectionDetails.method}
+                  {serverDetails.connectionDetails.method === 'url' && 
+                   serverDetails.connectionDetails.url && 
+                   ` (${serverDetails.connectionDetails.url})`}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => handleRemoveServer(serverDetails?.id || "")}
+              className="mr-auto"
+            >
+              Remove
+            </Button>
+            <Button onClick={() => setShowServerDetailsDialog(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Server Dialog */}
+      <Dialog open={showServerDialog} onOpenChange={setShowServerDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add MCP Server</DialogTitle>
+            <DialogDescription>
+              Add a server to enhance your AI capabilities
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Tabs defaultValue="marketplace">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
+                <TabsTrigger value="url">URL</TabsTrigger>
+                <TabsTrigger value="docker">Docker</TabsTrigger>
+                <TabsTrigger value="config">Config File</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="marketplace" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  {availableServers.length === 0 ? (
+                    <div className="text-center text-muted-foreground py-4">
+                      No marketplace servers available
+                    </div>
+                  ) : (
+                    availableServers.map((server) => (
+                      <Button
+                        key={server.id}
+                        variant="outline"
+                        className="w-full justify-start"
+                        onClick={() => handleInstallServer(server)}
+                      >
+                        <div className="text-left">
+                          <div className="font-medium">{server.name}</div>
+                          <div className="text-xs text-muted-foreground">{server.description}</div>
+                        </div>
+                      </Button>
+                    ))
+                  )}
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="url" className="space-y-4 mt-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Server URL</label>
+                    <Input
+                      placeholder="https://example.com/mcp"
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleServerUrlAdd}
+                    disabled={!serverUrl.trim()}
+                    className="w-full"
+                  >
+                    Add Server
+                  </Button>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="docker" className="space-y-4 mt-4">
+                <div className="space-y-4">
+                  <div className="p-3 border rounded-md bg-gray-50 dark:bg-gray-900 mb-4">
+                    <p className="text-sm mb-2 font-medium">MCP Server Requirements:</p>
+                    <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-1">
+                      <li>Your Docker container must implement the MCP protocol</li>
+                      <li>It should respond to JSON-RPC requests at the /mcp endpoint</li>
+                      <li>Static web servers like Nginx alone won't work</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Docker Deployment Path</label>
+                    <Input
+                      placeholder="/home/lazy/Projects/1-stop-mcp-shop/docker-deployments/my-server-123456789"
+                      value={dockerDeployPath}
+                      onChange={(e) => setDockerDeployPath(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter the full path to your Docker deployment directory
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Port</label>
+                    <Input
+                      placeholder="3000"
+                      value={dockerPort}
+                      onChange={(e) => setDockerPort(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enter the port your Docker MCP server is running on (check docker-compose.yml for the port mapping)
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={handleDockerServerAdd}
+                    disabled={!dockerDeployPath.trim()}
+                    className="w-full"
+                  >
+                    Add Docker Server
+                  </Button>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="config" className="space-y-4 mt-4">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Configuration File</label>
+                    <div className="flex items-center justify-center border border-dashed rounded-md p-4">
+                      <label className="cursor-pointer">
+                        <Input
+                          type="file"
+                          className="hidden"
+                          accept=".json"
+                          onChange={handleConfigFileUpload}
+                          disabled={configProcessing}
+                        />
+                        <div className="text-center">
+                          <p className="text-sm text-muted-foreground">
+                            Click to upload a JSON configuration file
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowServerDialog(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

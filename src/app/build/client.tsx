@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ServerBuilder } from "@/components/server/server-builder";
-import { ServerDeployment } from "@/components/server/server-deployment";
-import { MCPTool } from "@/lib/types";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { ServerBuilder } from "../../components/server/server-builder";
+import { ServerDeployment } from "../../components/server/server-deployment";
+import { MCPTool } from "../../lib/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
 
 export default function BuildPageClient() {
   const [generatedTools, setGeneratedTools] = useState<MCPTool[]>([]);

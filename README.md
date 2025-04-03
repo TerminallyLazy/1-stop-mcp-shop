@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MCP Shop
 
-## Getting Started
+A platform for discovering, installing, and using Model Context Protocol (MCP) servers with Large Language Models.
 
-First, run the development server:
+## Key Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### MCP Server Management
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Server Discovery**: Find and connect to MCP servers via the Marketplace or by adding them directly.
+- **Persistence**: All connected servers remain persistent across page navigation and browser sessions.
+- **Multiple Connection Methods**: Add servers via URL, config file, or from the marketplace.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Client Page Features
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Clickable Server Cards**: Click on any connected MCP server to see detailed information about its tools.
+- **Tool Details View**: View all available tools, their parameters, descriptions, and requirements.
+- **Server Management**: Easily add or remove servers from your collection.
+- **Connection State**: The connection method (URL or config) is stored with each server.
 
-## Learn More
+### Marketplace Integration
 
-To learn more about Next.js, take a look at the following resources:
+- **Shared Server Repository**: Servers added on the Client page also appear in the Marketplace as installed.
+- **Categorized Browsing**: Browse available servers by category or search.
+- **Install Status**: Marketplace shows which servers are already installed.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Data Persistence
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The application uses `localStorage` with the key `mcp-installed-servers` to store all user's connected servers. This ensures:
 
-## Deploy on Vercel
+1. Servers remain available between page navigation
+2. Servers persist across browser sessions
+3. Different parts of the application share the same server repository
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Adding MCP Servers
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+There are multiple ways to add servers:
+
+1. **Marketplace**: Browse and install pre-configured servers
+2. **URL**: Connect to a server via a direct URL
+3. **Config File**: Upload a configuration file that defines server properties and connection methods
+4. **Command Line**: Run standalone MCP servers locally and connect to them
+
+## Using MCP Tools
+
+Once servers are connected, you can:
+
+1. View all available tools by clicking on the server card
+2. Chat with AI models that can utilize the connected tools
+3. Watch as the AI invokes tools to answer questions
+
+## Implementation Details
+
+The application uses a shared storage system to maintain consistency across different parts of the application:
+
+- The storage key `MCP_SERVERS_STORAGE_KEY` ('mcp-installed-servers') is used consistently
+- Both the Marketplace and Client pages reference the same storage
+- Server details include connection information for proper reconnection

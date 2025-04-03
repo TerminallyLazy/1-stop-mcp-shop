@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { MCPTool } from "@/lib/types";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { MCPTool } from "../../lib/types";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../../components/ui/collapsible";
 
 interface ToolsPanelProps {
   tools: MCPTool[];

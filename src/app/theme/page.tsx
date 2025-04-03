@@ -1,5 +1,5 @@
-import { Navbar } from "@/components/layout/navbar";
-import { DarkThemeShowcase } from "@/components/theme/dark-theme-showcase";
+import { Navbar } from "../../components/layout/navbar";
+import { DarkThemeShowcase } from "../../components/theme/dark-theme-showcase";
 
 export default function ThemePage() {
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ToolCall } from "@/lib/types";
+import { ToolCall } from "../../lib/types";
 
 // This component displays the tool call arguments in a collapsible format
 export function ToolResultDisplay({ toolCall }: { toolCall: ToolCall }) {

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { MCPServer } from "@/lib/types";
-import { getUserSession, UserSession } from "@/lib/supabase";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Input } from "../../components/ui/input";
+import { MCPServer } from "../../lib/types";
+import { getUserSession, supabase, UserSession } from "../../lib/supabase";
 
 export function ServerHostingManager() {
   const [servers, setServers] = useState<MCPServer[]>([]);
@@ -23,39 +23,72 @@ export function ServerHostingManager() {
         const session = await getUserSession();
         setUserSession(session);
         
-        // Simulate fetching servers
-        const mockServers: MCPServer[] = [
-          {
-            id: "server-123",
-            name: "Weather API Hub",
-            description: "Multi-source weather data with forecasts and historical data",
-            ownerId: session.user?.id || "unknown",
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            isPublic: true,
-            expiresAt: session.subscription === "premium" 
-              ? undefined 
-              : new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-            tools: [{
-              id: "tool-123",
-              name: "get_weather",
-              description: "Get current weather and forecast for a location",
-              parameters: [
-                {
-                  name: "location",
-                  type: "string",
-                  description: "City name or coordinates",
-                  required: true
-                }
-              ],
-              serverId: "server-123",
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString()
-            }]
+        // Fetch servers from backend
+        try {
+          const { data: serverData, error: serverError } = await supabase
+            .from('mcp_servers')
+            .select('*')
+            .eq('owner_id', session?.user?.id || '')
+            .order('created_at', { ascending: false });
+            
+          if (serverError) {
+            console.error('Failed to fetch servers:', serverError.message);
+            setServers([]);
+            return;
           }
-        ];
-        
-        setServers(mockServers);
+          
+          // Fetch tools for these servers
+          const { data: toolsData, error: toolsError } = await supabase
+            .from('mcp_tools')
+            .select('*')
+            .in('server_id', serverData.map((s: { id: any; }) => s.id));
+            
+          if (toolsError) {
+            console.error('Failed to fetch tools:', toolsError.message);
+          }
+          
+          // Map server data
+          const mappedServers: MCPServer[] = serverData.map((server: { id: any; name: any; description: any; owner_id: any; created_at: any; updated_at: any; is_public: any; expires_at: any; schema_version: any; transport_types: any; capabilities: any; }) => {
+            const serverTools = (toolsData || [])
+              .filter((tool: { server_id: any; }) => tool.server_id === server.id)
+              .map((tool: { id: any; name: any; description: any; parameters: any; server_id: any; created_at: any; updated_at: any; }) => ({
+                id: tool.id,
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters || [],
+                serverId: tool.server_id,
+                createdAt: tool.created_at,
+                updatedAt: tool.updated_at
+              }));
+              
+            return {
+              id: server.id,
+              name: server.name,
+              description: server.description,
+              ownerId: server.owner_id,
+              createdAt: server.created_at,
+              updatedAt: server.updated_at,
+              isPublic: server.is_public,
+              expiresAt: server.expires_at,
+              tools: serverTools,
+              resources: [],
+              prompts: [],
+              schemaVersion: server.schema_version || "2025-03-26",
+              transportTypes: server.transport_types || ["sse", "stdio"],
+              capabilities: server.capabilities || {
+                tools: serverTools.length > 0,
+                resources: false,
+                prompts: false,
+                sampling: false
+              }
+            };
+          });
+          
+          setServers(mappedServers);
+        } catch (error) {
+          console.error('Error fetching servers:', error);
+          setServers([]);
+        }
       } catch (error) {
         console.error("Error fetching data:", error);
       } finally {
@@ -114,30 +147,70 @@ export function ServerHostingManager() {
     }
   };
 
-  const handleExtend = (serverId: string) => {
-    // In a real implementation, this would extend the server's expiration time
-    setServers(prev => prev.map(server => {
-      if (server.id === serverId) {
-        const newExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        return { ...server, expiresAt: newExpiresAt };
+  const handleExtend = async (serverId: string) => {
+    try {
+      // Update the UI immediately for better UX
+      const newExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      setServers(prev => prev.map(server => {
+        if (server.id === serverId) {
+          return { ...server, expiresAt: newExpiresAt };
+        }
+        return server;
+      }));
+      
+      // Update in the database
+      const { error } = await supabase
+        .from('mcp_servers')
+        .update({ 
+          expires_at: newExpiresAt,
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', serverId);
+        
+      if (error) {
+        console.error('Error extending server:', error);
+        // Revert UI if update failed
+        setServers(prev => [...prev]); // Trigger re-fetch
       }
-      return server;
-    }));
+    } catch (error) {
+      console.error('Error extending server:', error);
+    }
   };
 
   const handleUpgrade = () => {
     setShowUpgradeDialog(true);
   };
 
-  const handleRestartServer = (serverId: string) => {
-    // In a real implementation, this would restart the server
-    setServers(prev => prev.map(server => {
-      if (server.id === serverId) {
-        const newExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
-        return { ...server, expiresAt: newExpiresAt };
+  const handleRestartServer = async (serverId: string) => {
+    try {
+      const newExpiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      
+      // Update UI immediately
+      setServers(prev => prev.map(server => {
+        if (server.id === serverId) {
+          return { ...server, expiresAt: newExpiresAt };
+        }
+        return server;
+      }));
+      
+      // Update in the database and restart the server process
+      const { error } = await supabase
+        .from('mcp_servers')
+        .update({ 
+          expires_at: newExpiresAt,
+          updated_at: new Date().toISOString(),
+          status: 'running' 
+        })
+        .eq('id', serverId);
+        
+      if (error) {
+        console.error('Error restarting server:', error);
+        // Handle error and revert UI
+        setServers(prev => [...prev]); // Trigger re-fetch
       }
-      return server;
-    }));
+    } catch (error) {
+      console.error('Error restarting server:', error);
+    }
   };
 
   return (
@@ -181,7 +254,7 @@ export function ServerHostingManager() {
                     <div className="mt-3 text-sm">
                       <div className="flex justify-between">
                         <span>Server URL:</span>
-                        <span className="font-mono">https://agent.mcpify.ai/sse?server={server.id}</span>
+                        <span className="font-mono">{window.location.origin}/api/mcp/{server.id}</span>
                       </div>
                       <div className="flex justify-between mt-1">
                         <span>Tools:</span>

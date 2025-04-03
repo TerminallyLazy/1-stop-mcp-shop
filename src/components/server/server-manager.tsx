@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { MCPServer } from "@/lib/types";
-import { getUserSession, UserSession, supabase } from "@/lib/supabase";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { MCPServer } from "../../lib/types";
+import { getUserSession, UserSession, supabase } from "../../lib/supabase";
 
 export function ServerManager() {
   const [servers, setServers] = useState<MCPServer[]>([]);
@@ -20,47 +20,9 @@ export function ServerManager() {
         setUserSession(session);
         
         if (!session?.user?.id) {
-          // No user logged in, use mock data for demo
-          const mockServers: MCPServer[] = [
-            {
-              id: "server-demo-123",
-              name: "Demo Weather API Hub",
-              description: "Multi-source weather data with forecasts and historical data",
-              ownerId: "anonymous",
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              isPublic: true,
-              expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-              tools: [{
-                id: "tool-123",
-                name: "get_weather",
-                description: "Get current weather and forecast for a location",
-                parameters: [
-                  {
-                    name: "location",
-                    type: "string",
-                    description: "City name or coordinates",
-                    required: true
-                  }
-                ],
-                serverId: "server-demo-123",
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-              }],
-              resources: [],
-              prompts: [],
-              schemaVersion: "2025-03-26",
-              transportTypes: ["sse", "stdio"],
-              capabilities: {
-                tools: true,
-                resources: false,
-                prompts: false,
-                sampling: false
-              }
-            }
-          ];
-          
-          setServers(mockServers);
+          // No user logged in, show empty state
+          setServers([]);
+          setLoading(false);
           return;
         }
         
@@ -72,8 +34,8 @@ export function ServerManager() {
           .order('created_at', { ascending: false });
           
         if (serverError) {
-          console.warn('Failed to fetch servers from database:', serverError.message);
-          // Fall back to mock data if database error
+          console.error('Failed to fetch servers from database:', serverError.message);
+          // Show error state
           setServers([]);
           return;
         }
