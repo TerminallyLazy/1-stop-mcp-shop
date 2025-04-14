@@ -28,7 +28,7 @@
         "mcp/perplexity-ask"
       ],
       "env": {
-        "PERPLEXITY_API_KEY": "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"
+        "PERPLEXITY_API_KEY": "YOUR_PERPLEXITY_API_KEY"
       }
     },
     "filesystem": {
@@ -47,7 +47,7 @@
         "@modelcontextprotocol/server-brave-search"
       ],
       "env": {
-        "BRAVE_API_KEY": "BSAsGPAsbtbA-0P-hX4HEiqfnCpaymR"
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY"
       }
     },
     "supabase": {
@@ -56,7 +56,7 @@
         "-y",
         "@supabase/mcp-server-supabase@latest",
         "--access-token",
-        "sbp_f6a22beb7f992c50936c40d1de13f279c8cd9b80"
+        "YOUR_SUPABASE_ACCESS_TOKEN"
       ]
     }
   }
