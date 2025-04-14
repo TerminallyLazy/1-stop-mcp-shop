@@ -1,57 +1,120 @@
-# MCP Shop
+# 1-Stop MCP Shop
 
-A platform for discovering, installing, and using Model Context Protocol (MCP) servers with Large Language Models.
+A comprehensive platform for building, managing, and using Model Context Protocol (MCP) servers with a beautiful UI and intelligent agent integration.
 
-## Key Features
+## Features
 
-### MCP Server Management
+- **MCP Client UI**: Modern React/Next.js interface for interacting with MCP servers
+- **MCP Server Builder**: Create MCP servers with natural language descriptions
+- **Archon Agent Swarm**: Multi-agent system for complex reasoning tasks using MCP tools
+- **Weather & Financial Data Tools**: Built-in MCP servers for real-time data access
+- **Docker Deployment**: Easy deployment of MCP servers with Docker
 
-- **Server Discovery**: Find and connect to MCP servers via the Marketplace or by adding them directly.
-- **Persistence**: All connected servers remain persistent across page navigation and browser sessions.
-- **Multiple Connection Methods**: Add servers via URL, config file, or from the marketplace.
+## Getting Started
 
-### Client Page Features
+### Prerequisites
 
-- **Clickable Server Cards**: Click on any connected MCP server to see detailed information about its tools.
-- **Tool Details View**: View all available tools, their parameters, descriptions, and requirements.
-- **Server Management**: Easily add or remove servers from your collection.
-- **Connection State**: The connection method (URL or config) is stored with each server.
+- Python 3.10+
+- Node.js 18+
+- npm 9+
+- Docker (optional, for deployment)
 
-### Marketplace Integration
+### Installation
 
-- **Shared Server Repository**: Servers added on the Client page also appear in the Marketplace as installed.
-- **Categorized Browsing**: Browse available servers by category or search.
-- **Install Status**: Marketplace shows which servers are already installed.
+1. Clone the repository
+   ```bash
+   git clone https://github.com/yourusername/1-stop-mcp-shop.git
+   cd 1-stop-mcp-shop
+   ```
 
-## Data Persistence
+2. Install Python dependencies
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-The application uses `localStorage` with the key `mcp-installed-servers` to store all user's connected servers. This ensures:
+3. Install Node.js dependencies
+   ```bash
+   npm install
+   ```
 
-1. Servers remain available between page navigation
-2. Servers persist across browser sessions
-3. Different parts of the application share the same server repository
+4. Copy the environment file example
+   ```bash
+   cp .env.example .env.local
+   ```
+   Update the API keys in `.env.local` as needed
 
-## Adding MCP Servers
+## Usage
 
-There are multiple ways to add servers:
+### MCP Client UI
 
-1. **Marketplace**: Browse and install pre-configured servers
-2. **URL**: Connect to a server via a direct URL
-3. **Config File**: Upload a configuration file that defines server properties and connection methods
-4. **Command Line**: Run standalone MCP servers locally and connect to them
+The MCP Client UI provides a modern web interface for interacting with MCP servers.
 
-## Using MCP Tools
+```bash
+python mcp_client_ui.py --server-paths weather_mcp_server.js
+```
 
-Once servers are connected, you can:
+This will:
+1. Start the Next.js frontend server
+2. Connect to the specified MCP servers
+3. Make them available through the UI at http://localhost:3000/client
 
-1. View all available tools by clicking on the server card
-2. Chat with AI models that can utilize the connected tools
-3. Watch as the AI invokes tools to answer questions
+You can connect to multiple MCP servers by specifying multiple paths:
 
-## Implementation Details
+```bash
+python mcp_client_ui.py --server-paths weather_mcp_server.js weather_server.py
+```
 
-The application uses a shared storage system to maintain consistency across different parts of the application:
+### Archon Agent Swarm
 
-- The storage key `MCP_SERVERS_STORAGE_KEY` ('mcp-installed-servers') is used consistently
-- Both the Marketplace and Client pages reference the same storage
-- Server details include connection information for proper reconnection
+The Archon Agent Swarm provides a multi-agent system for complex reasoning tasks.
+
+```bash
+python archon_swarm_runner.py --task "Analyze the weather patterns in California for the last week"
+```
+
+Optional arguments:
+- `--iterations` or `-i`: Number of iterations to run (default: 3)
+- `--output` or `-o`: Output file to save results to
+- `--verbose` or `-v`: Enable verbose output
+
+## MCP Servers
+
+### Weather MCP Server
+
+The Weather MCP Server provides weather data for locations around the world.
+
+```bash
+node weather_mcp_server.js
+```
+
+Tools:
+- `get_weather(location)`: Get current weather for a location
+- `get_forecast(location, days)`: Get weather forecast for a location
+
+### Stock Price MCP Server
+
+The Stock Price MCP Server provides real-time stock price data.
+
+```bash
+node docker-deployments/stock-fetcher-mcp-*/index.js
+```
+
+Tools:
+- `get_stock_price(symbol)`: Get the current stock price for a symbol
+
+## Project Structure
+
+- `src/`: Next.js frontend code
+  - `app/`: Next.js app directory
+  - `components/`: React components
+  - `lib/`: Utility functions
+- `agent_tools.py`: MCP integration tools for agents
+- `archon_agent_swarm.py`: Archon multi-agent system
+- `archon_swarm_runner.py`: CLI for running the Archon swarm
+- `mcp_client_ui.py`: CLI for running the MCP Client UI
+- `weather_mcp_server.js`: JavaScript MCP server for weather data
+- `weather_server.py`: Python MCP server for weather data
+
+## License
+
+Copyright © 2025 Emcee-PRO. All rights reserved.

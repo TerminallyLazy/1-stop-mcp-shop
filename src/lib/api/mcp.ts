@@ -512,7 +512,7 @@ function generateServerConfigFile(
     version: "1.0.0",
     schema_version: "2025-03-26",
     transport_types: ["sse", "stdio"],
-    sse_endpoint: `https://agent.mcpify.ai/sse?server=${serverId}`
+    sse_endpoint: `http://localhost:3000/sse?server=${serverId}`
   }, null, 2);
 }
 
@@ -1736,7 +1736,8 @@ Follow the structure from MCP-SERVER-DEVS.md:
 - Implement REAL, FUNCTIONAL code for EACH tool (not simulations)
 - Create proper API clients for external services
 - Add comprehensive error handling
-- Set up proper transport (stdio or HTTP)
+- Set up proper transport (stdio or sse)
+- sse will use import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 - Create a main function to run the server
 
 Example of how to implement a REAL tool (adapt to the specific tools needed):
@@ -1875,43 +1876,43 @@ These should be in separate sections clearly labeled for each file. Each section
       serverCode = serverCode.trim();
       
       // Verify the code contains no simulation or mock patterns
-      const simulationPatterns = [
-        "TODO: Implement",
-        "Example implementation",
-        "Successfully executed",
-        "simulation",
-        "mock",
-        "placeholder"
-      ];
+      // const simulationPatterns = [
+      //   "TODO: Implement",
+      //   "Example implementation",
+      //   "Successfully executed",
+      //   "simulation",
+      //   "mock",
+      //   "placeholder"
+      // ];
       
-      const containsSimulation = simulationPatterns.some(pattern => 
-        serverCode.toLowerCase().includes(pattern.toLowerCase())
-      );
+      // const containsSimulation = simulationPatterns.some(pattern => 
+      //   serverCode.toLowerCase().includes(pattern.toLowerCase())
+      // );
       
-      if (containsSimulation) {
-        console.warn("LLM generated code with simulation patterns. Regenerating...");
+      // if (containsSimulation) {
+      //   console.warn("LLM generated code with simulation patterns. Regenerating...");
         
-        // If we find simulation patterns, make one more attempt with stronger wording
-        const retryResponse = await fetch('/api/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: formattedModel,
-            prompt: prompt + "\n\nIMPORTANT: YOUR PREVIOUS RESPONSE STILL CONTAINED SIMULATION CODE. DO NOT USE ANY PLACEHOLDER, SIMULATION OR MOCK IMPLEMENTATIONS. IMPLEMENT REAL API CALLS AND FULLY FUNCTIONAL CODE ONLY.",
-            generationConfig: {
-              temperature: 0.05,
-              maxOutputTokens: 16384,
-            }
-          })
-        });
+      //   // If we find simulation patterns, make one more attempt with stronger wording
+      //   const retryResponse = await fetch('/api/gemini', {
+      //     method: 'POST',
+      //     headers: { 'Content-Type': 'application/json' },
+      //     body: JSON.stringify({
+      //       model: formattedModel,
+      //       prompt: prompt + "\n\nIMPORTANT: YOUR PREVIOUS RESPONSE STILL CONTAINED SIMULATION CODE. DO NOT USE ANY PLACEHOLDER, SIMULATION OR MOCK IMPLEMENTATIONS. IMPLEMENT REAL API CALLS AND FULLY FUNCTIONAL CODE ONLY.",
+      //       generationConfig: {
+      //         temperature: 0.05,
+      //         maxOutputTokens: 16384,
+      //       }
+      //     })
+      //   });
         
-        if (retryResponse.ok) {
-          const retryData = await retryResponse.json();
-          if (retryData.candidates && retryData.candidates.length > 0) {
-            serverCode = retryData.candidates[0].content.parts[0].text.trim();
-          }
-        }
-      }
+      //   if (retryResponse.ok) {
+      //     const retryData = await retryResponse.json();
+      //     if (retryData.candidates && retryData.candidates.length > 0) {
+      //       serverCode = retryData.candidates[0].content.parts[0].text.trim();
+      //     }
+      //   }
+      // }
       
       console.log('Successfully generated REAL server code with LLM');
       return serverCode;
@@ -1927,7 +1928,7 @@ These should be in separate sections clearly labeled for each file. Each section
 \`\`\`typescript
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { HttpServerTransport } from "@modelcontextprotocol/sdk/server/http.js";
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { z } from "zod";
 import dotenv from "dotenv";
 
@@ -1969,11 +1970,11 @@ server.tool(
 // Main function to start the server
 async function main() {
   try {
-    // Use HTTP transport if PORT is defined, otherwise fall back to stdio
+    // Use SSE transport if PORT is defined, otherwise fall back to stdio
     if (process.env.PORT) {
       const port = parseInt(process.env.PORT, 10) || 3000;
       console.log(\`Starting MCP server on port \${port}\`);
-      const transport = new HttpServerTransport({ port });
+      const transport = new SSEClientTransport({ port });
       await server.connect(transport);
     } else {
       console.log("Starting MCP server with stdio transport");
