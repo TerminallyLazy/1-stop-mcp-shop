@@ -1,0 +1,4 @@
+# Multi-Agent Archon Swarm Requirements
+httpx>=0.24.0
+logfire>=0.6.0
+python-dotenv>=1.0.0

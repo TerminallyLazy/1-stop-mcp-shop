@@ -1,103 +1,57 @@
-# Docker Deployment Issue Analysis
+# 1-Stop MCP Shop Project Notes
 
-## Error:
-- Docker deployment failed: Command failed: docker compose up -d --build failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1
-- Docker deployment failed: Error response from daemon: Ports are not available: exposing port TCP 0.0.0.0:3000 -> 127.0.0.1:0: listen tcp 0.0.0.0:3000: bind: address already in use
+## Issue Fixed: Missing MCP Modules
+- Created missing modules needed for the Archon swarm system:
+  1. `mcp_archon_create_thread.py` - For creating new Archon conversation threads
+  2. `mcp_archon_run_agent.py` - For running Archon agents with user input
 
-## Potential causes:
-1. The generated package.json file doesn't have the required dependencies properly defined
-2. There's an issue with package-lock.json generation - it's not matching the package.json
-3. File extraction from markdown code blocks may have issues
-4. Environment variables might be missing that are required for npm ci
-5. Port 3000 is already in use by another service when trying to deploy
+## New Integration: MCP Client UI
+- Created `mcp_client_ui.py` to connect the Archon swarm with the existing Next.js UI
+- This provides a beautiful UI for interacting with MCP servers
+- The UI allows users to:
+  - Connect to MCP servers
+  - Send messages to LLMs with MCP tool access
+  - View server details and available tools
+  - Add new servers via URL or configuration
 
-## Deployment pipeline:
-1. extractCodeBlocksFromMarkdown extracts files from markdown
-2. Default tsconfig.json and package-lock.json are added if needed
-3. The files are written to a deployment directory
-4. Docker Compose runs to build and deploy
+## Abacus MCP Integration
+- Created custom connector for Abacus MCP server: `abacus_mcp_connector.py`
+- Handles the special WebSocket protocol required by Abacus
+- Implemented diagnostic tool `diagnose_abacus_mcp.py` for troubleshooting connection issues
+- Identified the root cause of the HTTP 500 error (using wrong protocol - needs WebSocket)
 
-## Investigation:
-- In deployment-modal.tsx, a basic package-lock.json is generated but it doesn't include actual dependencies
-- Need to improve package-lock.json generation to include all dependencies from package.json
-- The docker-compose.yml file always uses port 3000, which could be in use
-
-## Proposed solution:
-1. Update the package-lock.json generation in deployment-modal.tsx 
-2. Modify the npm ci command in Docker to use npm install instead
-3. Add error details display for npm-related errors
-4. Implement dynamic port allocation to avoid port conflicts:
-   - Added a findAvailablePort() function that checks for an available port starting from 3000
-   - Modified docker-compose.yml generation to use the dynamically assigned port
-   - Updated the returned URL to use the discovered port
-   - Added better error handling for port allocation failures
-
-## Implemented Fixes:
-1. Added dynamic port allocation in route.ts:
-   - Uses net module to test if ports are available
-   - Tries ports starting from 3000 until it finds an available one
-   - Updates docker-compose.yml to use the available port
-   - Returns the correct URL with the discovered port to the frontend
-
-2. Added Docker server integration in client page:
-   - Added a "Docker" tab in the "Add Server" dialog
-   - Created a field to enter Docker deployment path
-   - Implemented handleDockerServerAdd function to:
-     - Validate the Docker deployment path with a new API endpoint
-     - Extract port from docker-compose.yml
-     - Create a server entry with the correct URL (http://localhost:{PORT})
-     - Trigger tool discovery for the Docker server
-   - Created new API endpoint /api/mcp/validate-docker-path to:
-     - Verify that the Docker deployment path exists
-     - Read and parse docker-compose.yml
-     - Extract the published port from the port mapping
-     - Return validation status and port information
-   - Added fallback message for manual URL addition if automatic integration fails
-
-## Docker Server Discovery Issue
-
-**Problem:**
-When connecting to Docker-deployed servers, the client receives HTML instead of JSON from the discovery endpoint. The error is:
+## How to Connect to Abacus MCP
+```bash
+python mcp_client_ui.py --server-urls "https://10967c9f45.dev.abacusai.app/api/mcp/connect"
 ```
-Error discovering tools for server url-docker-1743664173049: Error: Discovery failed: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+
+## How to Run the MCP Client UI
+```bash
+python mcp_client_ui.py --server-paths weather_mcp_server.js
 ```
-Additionally, the error message appears to be repeated infinitely in some cases.
 
-**Root Cause:**
-1. The Docker containers being deployed are simple Nginx static web servers, not MCP protocol servers
-2. The MCP protocol requires servers to respond to JSON-RPC requests, but the Nginx server is returning HTML pages
-3. The discovery process doesn't properly handle HTML responses, causing infinite retries in some cases
+This will:
+1. Start the Next.js frontend
+2. Connect to the specified MCP servers
+3. Register them with an Archon agent
+4. Make the UI available at http://localhost:3000/client
 
-**Solution Implementation:**
-1. Enhanced the discovery code to better detect HTML responses:
-   - Added early detection of HTML content before making JSON-RPC requests
-   - Added server header detection to identify Nginx/Apache servers
-   - Improved error messages to clearly explain the issue
+## How the Archon Swarm System Works
+The Archon swarm system is a multi-agent framework that:
+1. Creates a new conversation thread using `mcp_archon_create_thread`
+2. Initializes a swarm of specialized agents (coordinator, researcher, reasoner, etc.)
+3. Runs multiple iterations of agent collaboration using `mcp_archon_run_agent`
+4. Produces a final synthesized result from all agents
 
-2. Fixed infinite retry issues:
-   - Updated the useEffect hook to prevent discovery loops
-   - Limited discovery to one server at a time
-   - Added proper timeout handling for discovery requests
-   - Ensured discovery state is always properly reset
+## Usage (Archon Swarm)
+Run the system with a specific task:
+```bash
+python archon_swarm_runner.py --task "Your task description here"
+```
 
-3. Improved UI feedback:
-   - Added clear error messages explaining that Docker containers need to implement MCP protocol
-   - Added warnings in the server details dialog for Docker servers with no tools
-   - Added instructions on how to remove servers with discovery errors
-   - Created a consistent error handling approach throughout the discovery flow
-
-**Future Improvements:**
-- Provide a sample MCP server Docker template
-- Add auto-detection of common MCP server ports
-- Create a more graceful fallback mechanism for non-MCP servers
-
-**Technical Implementation Details:**
-1. Added HTML detection in multiple places:
-   - Initial GET request check
-   - Content-type header inspection
-   - Response body preview analysis
-2. Created a more robust discovery process:
-   - Better state management to prevent loops
-   - Clear timeout handling
-   - Proper error surfacing
-3. Enhanced error messages to be more actionable and user-friendly
+## Project Structure
+- React/Next.js frontend for UI
+- Python backend for agent operations
+- JavaScript MCP servers for various data sources
+- Multiple agents working together through Archon
+- Custom connectors for specialized MCP servers
