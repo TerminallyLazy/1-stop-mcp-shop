@@ -9,9 +9,9 @@ declare const window: Window | undefined;
  * Following MCP server development guide specifications
  */
 export async function createMCPServer(
-  name: string, 
-  description: string, 
-  ownerId: string, 
+  name: string,
+  description: string,
+  ownerId: string,
   isPublic: boolean = false,
   tools: MCPTool[] = [],
   resources: MCPResource[] = [],
@@ -19,21 +19,21 @@ export async function createMCPServer(
 ): Promise<MCPServer> {
   try {
     const now = new Date().toISOString();
-    
+
     // Check if the user has a premium subscription
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('subscription')
       .eq('id', ownerId)
       .single();
-      
+
     if (userError) {
       throw new Error(`Failed to fetch user data: ${userError.message}`);
     }
-    
+
     const isPremium = userData?.subscription === 'premium';
     const expiresAt = isPremium ? undefined : new Date(Date.now() + 5 * 60 * 1000).toISOString();
-    
+
     // Create the server in the database
     const { data: serverData, error: serverError } = await supabase
       .from('mcp_servers')
@@ -56,64 +56,64 @@ export async function createMCPServer(
       }])
       .select()
       .single();
-      
+
     if (serverError) {
       throw new Error(`Failed to create server: ${serverError.message}`);
     }
-    
+
     const serverId = serverData.id;
-    
+
     // Add tools to the server
     if (tools.length > 0) {
       const toolsWithServerId = tools.map(tool => ({
         ...tool,
         server_id: serverId
       }));
-      
+
       const { error: toolsError } = await supabase
         .from('mcp_tools')
         .insert(toolsWithServerId);
-        
+
       if (toolsError) {
         throw new Error(`Failed to add tools: ${toolsError.message}`);
       }
     }
-    
+
     // Add resources to the server if any
     if (resources.length > 0) {
       const resourcesWithServerId = resources.map(resource => ({
         ...resource,
         server_id: serverId
       }));
-      
+
       const { error: resourcesError } = await supabase
         .from('mcp_resources')
         .insert(resourcesWithServerId);
-        
+
       if (resourcesError) {
         throw new Error(`Failed to add resources: ${resourcesError.message}`);
       }
     }
-    
+
     // Add prompts to the server if any
     if (prompts.length > 0) {
       const promptsWithServerId = prompts.map(prompt => ({
         ...prompt,
         server_id: serverId
       }));
-      
+
       const { error: promptsError } = await supabase
         .from('mcp_prompts')
         .insert(promptsWithServerId);
-        
+
       if (promptsError) {
         throw new Error(`Failed to add prompts: ${promptsError.message}`);
       }
     }
-    
+
     // Generate server deployment files
     await generateServerDeploymentFiles(serverId, name, description, tools, resources, prompts);
-    
+
     // Return the created server with its capabilities
     return {
       id: serverId,
@@ -131,7 +131,7 @@ export async function createMCPServer(
       transportTypes: ["sse", "stdio"],
       capabilities: {
         tools: tools.length > 0,
-        resources: resources.length > 0, 
+        resources: resources.length > 0,
         prompts: prompts.length > 0,
         sampling: false
       }
@@ -157,13 +157,13 @@ async function generateServerDeploymentFiles(
   try {
     // Create a Python server implementation that matches MCP specs
     const pythonImplementation = generatePythonServerImplementation(serverId, name, description, tools, resources, prompts);
-    
+
     // Create a TypeScript server implementation that matches MCP specs
     const typescriptImplementation = generateTypeScriptServerImplementation(serverId, name, description, tools, resources, prompts);
-    
+
     // Create a server configuration file
     const configFile = generateServerConfigFile(serverId, name, description);
-    
+
     // Store these files in the database for later download
     await supabase
       .from('mcp_server_deployments')
@@ -176,7 +176,7 @@ async function generateServerDeploymentFiles(
           created_at: new Date().toISOString()
         }
       ]);
-      
+
   } catch (error) {
     console.error('Error generating server deployment files:', error);
     // Non-critical error, continue without failing the server creation
@@ -221,33 +221,33 @@ mcp.set_metadata(
   // Add tool implementations
   if (tools.length > 0) {
     code += `\n# Tool implementations\n`;
-    
+
     tools.forEach(tool => {
       // Generate function parameter annotations
       const params = tool.parameters.map(param => {
         const typeName = pythonTypeMap(param.type);
         return `${param.name}: ${typeName}${param.required ? '' : ' = None'}`;
       }).join(', ');
-      
+
       // Generate docstring for the tool
       const docstring = `"""
     ${tool.description}
-    
-    ${tool.parameters.length > 0 ? 'Parameters:\n' + tool.parameters.map(p => 
+
+    ${tool.parameters.length > 0 ? 'Parameters:\n' + tool.parameters.map(p =>
       `    ${p.name} (${p.type}): ${p.description}${p.required ? ' (Required)' : ''}`
     ).join('\n') : ''}
-    
+
     Returns:
         Result of the operation in a structured format
     """`;
-      
+
       code += `
 @mcp.tool()
 async def ${tool.name}(${params}) -> Dict[str, Any]:
     ${docstring}
     try:
         # TODO: Implement ${tool.name} functionality here
-        
+
         # Example implementation
         result = {
             "success": True,
@@ -256,7 +256,7 @@ async def ${tool.name}(${params}) -> Dict[str, Any]:
                 ${tool.parameters.map(p => `"${p.name}": ${p.name}`).join(',\n                ')}
             }
         }
-        
+
         return result
     except Exception as e:
         return {
@@ -266,18 +266,18 @@ async def ${tool.name}(${params}) -> Dict[str, Any]:
 `;
     });
   }
-  
+
   // Add resource implementations if any
   if (resources.length > 0) {
     code += `\n# Resource implementations\n`;
-    
+
     resources.forEach(resource => {
       code += `
 @mcp.resource(name="${resource.name}")
 async def get_${resource.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}() -> Dict[str, Any]:
     """
     ${resource.description}
-    
+
     Returns:
         Resource data
     """
@@ -296,18 +296,18 @@ async def get_${resource.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}() -> Dic
 `;
     });
   }
-  
+
   // Add prompt implementations if any
   if (prompts.length > 0) {
     code += `\n# Prompt implementations\n`;
-    
+
     prompts.forEach(prompt => {
       code += `
 @mcp.prompt(name="${prompt.name}")
 async def get_${prompt.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}() -> str:
     """
     ${prompt.description}
-    
+
     Returns:
         Prompt template
     """
@@ -315,7 +315,7 @@ async def get_${prompt.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}() -> str:
 `;
     });
   }
-  
+
   // Add main execution
   code += `
 # Main execution
@@ -375,7 +375,7 @@ mcp.useTransport('stdio');
   // Add tool implementations
   if (tools.length > 0) {
     code += `\n// Tool implementations\n`;
-    
+
     tools.forEach(tool => {
       // Generate zod schema for the tool parameters
       const paramSchema = `const ${tool.name}Schema = z.object({\n  ${tool.parameters.map(param => {
@@ -399,15 +399,15 @@ mcp.useTransport('stdio');
           default:
             typeSchema = 'z.unknown()';
         }
-        
+
         if (param.enum) {
           typeSchema = `z.enum([${param.enum.map(e => `'${e}'`).join(', ')}])`;
         }
-        
+
         if (param.default !== undefined) {
           typeSchema += `.default(${JSON.stringify(param.default)})`;
         }
-        
+
         return `${param.name}: ${param.required ? typeSchema : `${typeSchema}.optional()`}`;
       }).join(',\n  ')}
 });
@@ -425,7 +425,7 @@ mcp.tool({
   handler: async (params: ${tool.name}Params) => {
     try {
       // TODO: Implement ${tool.name} functionality here
-      
+
       // Example implementation
       return {
         success: true,
@@ -443,11 +443,11 @@ mcp.tool({
 `;
     });
   }
-  
+
   // Add resource implementations if any
   if (resources.length > 0) {
     code += `\n// Resource implementations\n`;
-    
+
     resources.forEach(resource => {
       code += `
 mcp.resource({
@@ -470,11 +470,11 @@ mcp.resource({
 `;
     });
   }
-  
+
   // Add prompt implementations if any
   if (prompts.length > 0) {
     code += `\n// Prompt implementations\n`;
-    
+
     prompts.forEach(prompt => {
       code += `
 mcp.prompt({
@@ -487,7 +487,7 @@ mcp.prompt({
 `;
     });
   }
-  
+
   // Add startup code
   code += `
 // Start the server
@@ -522,10 +522,10 @@ function generateServerConfigFile(
  */
 export async function generateMCPTools(
   description: string,
-  model: string = 'gemini-2.0-flash'
+  model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPTool[]> {
   console.log('Starting generateMCPTools for description:', description);
-  
+
   // Create a safety Promise that resolves with default tools after 15 seconds
   // This ensures we never have an interface that hangs indefinitely
   const safetyTimeout = new Promise<MCPTool[]>((resolve) => {
@@ -534,7 +534,7 @@ export async function generateMCPTools(
       resolve(createDefaultTools(description));
     }, 15000);
   });
-  
+
   // Create the actual API request promise
   const apiRequest = async (): Promise<MCPTool[]> => {
     try {
@@ -543,230 +543,231 @@ export async function generateMCPTools(
         console.log('Not in browser environment, using default tools');
         return createDefaultTools(description);
       }
-      
+
       // Check for API key
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
       if (!apiKey) {
         console.warn('Gemini API key is not configured, using default tools');
         return createDefaultTools(description);
       }
-      
-      // TEMPORARY FIX: Force using default tools while API issue is resolved
-      console.log('Temporarily using default tools while API issue is being resolved');
-      // Import and use the properly-formatted MCP tools generator
-      const { generateDefaultMCPTools } = await import('./mcp-tools');
-      return generateDefaultMCPTools(description);
-      
-        // Format model name according to Gemini's API requirements
-        const formattedModel = model.includes('/') 
-          ? model 
-          : model.startsWith('gemini-') 
-            ? `models/${model.replace('gemini-', 'gemini/')}` 
-            : model;
-        
-        // Craft a prompt for tool generation
-        const prompt = `
-    You are designing a Model Context Protocol (MCP) server. This server will provide AI assistants with tools for executing tasks.
 
-    Based on this description: "${description}"
+      // Format model name according to Gemini's API requirements
+      const formattedModel = model.includes('/')
+        ? model
+        : model.startsWith('gemini-')
+          ? `models/${model.replace('gemini-', 'gemini/')}`
+          : model;
 
-    Create tools following the Model Context Protocol specification. Each tool needs:
-    1. A name in snake_case (lowercase with underscores)
-    2. A clear description explaining what the tool does and when to use it
-    3. Well-defined parameters with these attributes:
-    - name: Parameter name in camelCase or snake_case
-    - type: One of "string", "number", "boolean", "object", or "array"
-    - description: Clear explanation of the parameter
-    - required: Boolean indicating if the parameter is required
-    - enum: Optional array of allowed values
-    - default: Optional default value
+      // Craft a more specific prompt based on the Mem0 template
+      const prompt = `
+You are designing a Model Context Protocol (MCP) server. This server will provide AI assistants with tools for executing tasks.
 
-    Return ONLY a JSON array of tools in the following format:
-    [
+Based on this description: "${description}"
+
+Create tools following the Model Context Protocol specification. Focus on creating real, functional tools that would be implemented with actual API integrations, not simulated data.
+
+Each tool needs:
+1. A name in snake_case (lowercase with underscores)
+2. A clear description explaining what the tool does and when to use it
+3. Well-defined parameters with these attributes:
+- name: Parameter name in camelCase or snake_case
+- type: One of "string", "number", "boolean", "object", or "array"
+- description: Clear explanation of the parameter
+- required: Boolean indicating if the parameter is required
+- enum: Optional array of allowed values
+- default: Optional default value
+
+Reference these examples from the Mem0 MCP Server template:
+
+1. save_memory: Store information in long-term memory with semantic indexing
+2. get_all_memories: Retrieve all stored memories
+3. search_memories: Find relevant memories using semantic search
+
+Return ONLY a JSON array of tools in the following format:
+[
+{
+  "name": "tool_name",
+  "description": "Clear description of what the tool does and when to use it",
+  "parameters": [
     {
-      "name": "tool_name",
-      "description": "Clear description of what the tool does and when to use it",
-      "parameters": [
-        {
-          "name": "param_name",
-          "type": "string|number|boolean|object|array",
-          "description": "What this parameter is used for",
-          "required": true/false,
-          "enum": ["option1", "option2"],  // Optional field
-          "default": "default_value"       // Optional field
-        }
-      ]
+      "name": "param_name",
+      "type": "string|number|boolean|object|array",
+      "description": "What this parameter is used for",
+      "required": true/false,
+      "enum": ["option1", "option2"],  // Optional field
+      "default": "default_value"       // Optional field
     }
-    ]
+  ]
+}
+]
 
-    Return only valid JSON without explanation, comments, or surrounding text.`;
+Return only valid JSON without explanation, comments, or surrounding text.`;
 
-        console.log('Trying to call Gemini API proxy...');
-        
-        // Use a direct fetch with a short timeout to handle API issues gracefully
-        const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
-          try {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), timeout);
-            const response = await fetch(url, {
-              ...options,
-              signal: controller.signal
-            });
-            clearTimeout(id);
-            return response;
-          } catch (error) {
-            console.error('Fetch error in fetchWithTimeout:', error);
-            throw error;  // Re-throw to handle in the caller
-          }
-        };
-        
-        // Try multiple API endpoints with a timeout
-        // Try the non-trailing slash first since it should now forward to the correct endpoint
-        const endpoints = ['/api/gemini', '/api/gemini/'];
-        let response = null;
-        let lastError = null;
-        let successfulEndpoint = null;
-        
-        // Set a short overall timeout for the whole operation
-        const apiCallStartTime = Date.now();
-        const maxTotalTimeout = 12000; // 12 seconds total max time
-        
-        for (const endpoint of endpoints) {
-          // Check if we've already spent too much time
-          if (Date.now() - apiCallStartTime > maxTotalTimeout) {
-            console.warn('Exceeded total API call timeout, falling back to default tools');
-            break;
-          }
-          
-          try {
-            console.log(`Trying API endpoint: ${endpoint}...`);
-            response = await fetchWithTimeout(endpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: formattedModel,
-                prompt: prompt,
-                generationConfig: {
-                  temperature: 0.2,
-                  topP: 0.95,
-                  maxOutputTokens: 20000,
-                  responseFormat: { type: "JSON" }
-                }
-              })
-            }, 6000); // 6 second timeout per endpoint
-            
-            if (response && response.ok) {
-              console.log(`Successfully connected to ${endpoint}`);
-              successfulEndpoint = endpoint;
-              break;
-            } else if (response) {
-              // We got a response but it wasn't OK
-              console.warn(`Got error response from ${endpoint}: ${response.status}`);
-              const errorText = await response.text();
-              console.warn(`Error details: ${errorText}`);
-              lastError = new Error(`Status ${response.status}: ${errorText}`);
-            }
-          } catch (endpointError) {
-            console.warn(`Error with endpoint ${endpoint}:`, endpointError);
-            lastError = endpointError;
-          }
-        }
-        
-        // If no response or not ok, fall back to default tools
-        if (!response || !response.ok) {
-          const errorMessage = lastError?.message || 'unknown error';
-          console.error(`Failed to get a valid API response: ${errorMessage}`);
-          console.log('Using default tools instead of waiting for API');
-          return createDefaultTools(description);
-        }
-        
-        console.log(`Successfully fetched data from ${successfulEndpoint}`);
-      
-        // Parse the response
-        const data = await response.json();
-        console.log('API response received:', data);
-        
-        // Check if there's an error in the response
-        if (data.error) {
-          console.error(`API returned error: ${data.error}`);
-          return createDefaultTools(description);
-        }
-        
-        if (!data.candidates || data.candidates.length === 0) {
-          console.warn('API response did not contain any candidates');
-          return createDefaultTools(description);
-        }
-        
-        // Check if candidates[0].content exists and has parts
-        if (!data.candidates[0].content || !data.candidates[0].content.parts || 
-            !data.candidates[0].content.parts[0] || !data.candidates[0].content.parts[0].text) {
-          console.error('Malformed API response - missing content or parts');
-          return createDefaultTools(description);
-        }
-        
-        const content = data.candidates[0].content.parts[0].text;
-        console.log('Received response from Gemini API');
-        
-        // Try to parse the JSON response
+      console.log('Trying to call Gemini API proxy...');
+
+      // Use a direct fetch with a short timeout to handle API issues gracefully
+      const fetchWithTimeout = async (url: string, options: any, timeout = 8000) => {
         try {
-          // First try direct parsing
-          let toolsData;
-          try {
-            toolsData = JSON.parse(content);
-          } catch (parseError) {
-            console.warn('Initial JSON parse failed, trying to extract JSON array');
-            // If direct parsing fails, try to extract an array from the text
-            const jsonMatch = content.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              toolsData = JSON.parse(jsonMatch[0]);
-            } else {
-              console.error('Could not find a JSON array in the response');
-              throw new Error('Response is not a valid JSON array');
-            }
+          const controller = new AbortController();
+          const id = setTimeout(() => controller.abort(), timeout);
+          const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+          });
+          clearTimeout(id);
+          return response;
+        } catch (error) {
+          console.error('Fetch error in fetchWithTimeout:', error);
+          throw error;  // Re-throw to handle in the caller
+        }
+      };
+
+      // Try multiple API endpoints with a timeout
+      const endpoints = ['/api/gemini', '/api/gemini/'];
+      let response = null;
+      let lastError = null;
+      let successfulEndpoint = null;
+
+      // Set a short overall timeout for the whole operation
+      const apiCallStartTime = Date.now();
+      const maxTotalTimeout = 12000; // 12 seconds total max time
+
+      for (const endpoint of endpoints) {
+        // Check if we've already spent too much time
+        if (Date.now() - apiCallStartTime > maxTotalTimeout) {
+          console.warn('Exceeded total API call timeout, falling back to default tools');
+          break;
+        }
+
+        try {
+          console.log(`Trying API endpoint: ${endpoint}...`);
+          response = await fetchWithTimeout(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: formattedModel,
+              prompt: prompt,
+              generationConfig: {
+                temperature: 0.2,
+                topP: 0.95,
+                maxOutputTokens: 20000,
+                responseFormat: { type: "JSON" }
+              }
+            })
+          }, 8000); // 8 second timeout per endpoint
+
+          if (response && response.ok) {
+            console.log(`Successfully connected to ${endpoint}`);
+            successfulEndpoint = endpoint;
+            break;
+          } else if (response) {
+            // We got a response but it wasn't OK
+            console.warn(`Got error response from ${endpoint}: ${response.status}`);
+            const errorText = await response.text();
+            console.warn(`Error details: ${errorText}`);
+            lastError = new Error(`Status ${response.status}: ${errorText}`);
           }
-          
-          // Verify toolsData is an array
-          if (!Array.isArray(toolsData)) {
-            console.error('Response is not a JSON array:', toolsData);
-            throw new Error('Response is not a JSON array');
-          }
-          
-          // Make sure we have valid tools data
-          if (toolsData.length === 0) {
-            console.warn('Response contained empty tools array');
-            return createDefaultTools(description);
-          }
-          
-          console.log('Successfully parsed tool data');
-          
-          // Process and format the tools
-          const now = new Date().toISOString();
-          return toolsData.map((tool: { name?: string; description?: string; parameters?: any[] }) => ({
-            id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            name: tool.name || `tool_${Math.random().toString(36).substring(2, 7)}`,
-            description: tool.description || 'A generated tool for this MCP server',
-            parameters: Array.isArray(tool.parameters) ? tool.parameters.map(param => ({
-              name: param.name || 'param',
-              type: ['string', 'number', 'boolean', 'object', 'array'].includes(param.type) ? param.type : 'string',
-              description: param.description || `Parameter for ${param.name || 'this tool'}`,
-              required: param.required === true,
-              enum: Array.isArray(param.enum) ? param.enum : undefined,
-              default: param.default
-            })) : [],
-            serverId: '',
-            createdAt: now,
-            updatedAt: now
-          }));
+        } catch (endpointError) {
+          console.warn(`Error with endpoint ${endpoint}:`, endpointError);
+          lastError = endpointError;
+        }
+      }
+
+      // If no response or not ok, fall back to default tools
+      if (!response || !response.ok) {
+        const errorMessage = lastError ? (lastError instanceof Error ? lastError.message : String(lastError)) : 'unknown error';
+        console.error(`Failed to get a valid API response: ${errorMessage}`);
+        console.log('Using default tools instead of waiting for API');
+        return createDefaultTools(description);
+      }
+
+      console.log(`Successfully fetched data from ${successfulEndpoint}`);
+
+      // Parse the response
+      const data = await response.json();
+      console.log('API response received:', data);
+
+      // Check if there's an error in the response
+      if (data.error) {
+        console.error(`API returned error: ${data.error}`);
+        return createDefaultTools(description);
+      }
+
+      if (!data.candidates || data.candidates.length === 0) {
+        console.warn('API response did not contain any candidates');
+        return createDefaultTools(description);
+      }
+
+      // Check if candidates[0].content exists and has parts
+      if (!data.candidates[0].content || !data.candidates[0].content.parts ||
+          !data.candidates[0].content.parts[0] || !data.candidates[0].content.parts[0].text) {
+        console.error('Malformed API response - missing content or parts');
+        return createDefaultTools(description);
+      }
+
+      const content = data.candidates[0].content.parts[0].text;
+      console.log('Received response from Gemini API');
+
+      // Try to parse the JSON response
+      try {
+        // First try direct parsing
+        let toolsData;
+        try {
+          toolsData = JSON.parse(content);
         } catch (parseError) {
-          console.error('Error parsing tool data:', parseError);
+          console.warn('Initial JSON parse failed, trying to extract JSON array');
+          // If direct parsing fails, try to extract an array from the text
+          const jsonMatch = content.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            toolsData = JSON.parse(jsonMatch[0]);
+          } else {
+            console.error('Could not find a JSON array in the response');
+            throw new Error('Response is not a valid JSON array');
+          }
+        }
+
+        // Verify toolsData is an array
+        if (!Array.isArray(toolsData)) {
+          console.error('Response is not a JSON array:', toolsData);
+          throw new Error('Response is not a JSON array');
+        }
+
+        // Make sure we have valid tools data
+        if (toolsData.length === 0) {
+          console.warn('Response contained empty tools array');
           return createDefaultTools(description);
         }
+
+        console.log('Successfully parsed tool data');
+
+        // Process and format the tools
+        const now = new Date().toISOString();
+        return toolsData.map((tool: { name?: string; description?: string; parameters?: any[] }) => ({
+          id: `tool-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          name: tool.name || `tool_${Math.random().toString(36).substring(2, 7)}`,
+          description: tool.description || 'A generated tool for this MCP server',
+          parameters: Array.isArray(tool.parameters) ? tool.parameters.map(param => ({
+            name: param.name || 'param',
+            type: ['string', 'number', 'boolean', 'object', 'array'].includes(param.type) ? param.type : 'string',
+            description: param.description || `Parameter for ${param.name || 'this tool'}`,
+            required: param.required === true,
+            enum: Array.isArray(param.enum) ? param.enum : undefined,
+            default: param.default
+          })) : [],
+          serverId: '',
+          createdAt: now,
+          updatedAt: now
+        }));
+      } catch (parseError) {
+        console.error('Error parsing tool data:', parseError);
+        return createDefaultTools(description);
+      }
     } catch (error) {
       console.error('Error in generateMCPTools:', error);
       return createDefaultTools(description);
     }
   };
-  
+
   // Race the API request against the safety timeout
   try {
     return await Promise.race([apiRequest(), safetyTimeout]);
@@ -781,16 +782,16 @@ export async function generateMCPTools(
  */
 export async function generateMCPResources(
   description: string,
-  model: string = 'gemini-2.0-flash'
+  model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPResource[]> {
   console.log('Starting generateMCPResources for description:', description);
-  
+
   // If we're not in a browser environment, return empty array
   if (typeof window === 'undefined') {
     console.log('Not in browser environment, skipping resource generation');
     return [];
   }
-  
+
   try {
     // Use a direct fetch with a short timeout to handle API issues gracefully
     const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
@@ -808,14 +809,14 @@ export async function generateMCPResources(
         throw error;
       }
     };
-    
+
     // Format model name
-    const formattedModel = model.includes('/') 
-      ? model 
-      : model.startsWith('gemini-') 
-        ? `models/${model.replace('gemini-', 'gemini/')}` 
+    const formattedModel = model.includes('/')
+      ? model
+      : model.startsWith('gemini-')
+        ? `models/${model.replace('gemini-', 'gemini/')}`
         : model;
-    
+
     // Craft a prompt to generate resources
     const prompt = `
 Based on this server description: "${description}"
@@ -842,7 +843,7 @@ Only include resources if they would be genuinely useful for the described funct
 `;
 
     console.log('Attempting to generate resources...');
-  
+
     // Make the API request through our proxy
     const response = await fetchWithTimeout('/api/gemini', {
       method: 'POST',
@@ -868,15 +869,15 @@ Only include resources if they would be genuinely useful for the described funct
           }
         }>
       };
-      
+
       if (data.candidates && data.candidates.length > 0) {
         const content = data.candidates[0].content.parts[0].text;
-        
+
         // Try to parse the JSON response
         try {
           // First try direct parsing
           let resourcesData = JSON.parse(content);
-          
+
           // If it's not an array, try to extract an array from the text
           if (!Array.isArray(resourcesData)) {
             const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -886,12 +887,12 @@ Only include resources if they would be genuinely useful for the described funct
               return []; // Not a valid array
             }
           }
-          
+
           // Format and return the resources
           if (Array.isArray(resourcesData) && resourcesData.length > 0) {
             console.log('Successfully parsed resource data');
             const now = new Date().toISOString();
-            
+
             return resourcesData.map(resource => ({
               id: `resource-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
               name: resource.name || `resource_${Math.random().toString(36).substring(2, 7)}`,
@@ -908,11 +909,11 @@ Only include resources if they would be genuinely useful for the described funct
         }
       }
     }
-    
+
     // If we get here, something went wrong but we don't need to return a fallback
     console.log('No resources were generated from the API');
     return [];
-    
+
   } catch (error) {
     console.error('Error generating MCP resources:', error);
     return [];
@@ -924,16 +925,16 @@ Only include resources if they would be genuinely useful for the described funct
  */
 export async function generateMCPPrompts(
   description: string,
-  model: string = 'gemini-2.0-flash'
+  model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<MCPPrompt[]> {
   console.log('Starting generateMCPPrompts for description:', description);
-  
+
   // If we're not in a browser environment, return empty array
   if (typeof window === 'undefined') {
     console.log('Not in browser environment, skipping prompt generation');
     return [];
   }
-  
+
   try {
     // Use a direct fetch with a short timeout to handle API issues gracefully
     const fetchWithTimeout = async (url: string, options: any, timeout = 5000) => {
@@ -951,14 +952,14 @@ export async function generateMCPPrompts(
         throw error;
       }
     };
-    
+
     // Format model name
-    const formattedModel = model.includes('/') 
-      ? model 
-      : model.startsWith('gemini-') 
-        ? `models/${model.replace('gemini-', 'gemini/')}` 
+    const formattedModel = model.includes('/')
+      ? model
+      : model.startsWith('gemini-')
+        ? `models/${model.replace('gemini-', 'gemini/')}`
         : model;
-    
+
     // Craft a prompt to generate MCP prompts
     const prompt = `
 Based on this server description: "${description}"
@@ -983,7 +984,7 @@ Only include prompts if they would be genuinely useful for the described functio
 `;
 
     console.log('Attempting to generate prompt templates...');
-  
+
     // Make the API request through our proxy
     const response = await fetchWithTimeout('/api/gemini', {
       method: 'POST',
@@ -1009,15 +1010,15 @@ Only include prompts if they would be genuinely useful for the described functio
           }
         }>
       };
-      
+
       if (data.candidates && data.candidates.length > 0) {
         const content = data.candidates[0].content.parts[0].text;
-        
+
         // Try to parse the JSON response
         try {
           // First try direct parsing
           let promptsData = JSON.parse(content);
-          
+
           // If it's not an array, try to extract an array from the text
           if (!Array.isArray(promptsData)) {
             const jsonMatch = content.match(/\[[\s\S]*\]/);
@@ -1027,12 +1028,12 @@ Only include prompts if they would be genuinely useful for the described functio
               return []; // Not a valid array
             }
           }
-          
+
           // Format and return the prompts
           if (Array.isArray(promptsData) && promptsData.length > 0) {
             console.log('Successfully parsed prompt template data');
             const now = new Date().toISOString();
-            
+
             return promptsData.map(prompt => ({
               id: `prompt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
               name: prompt.name || `prompt_${Math.random().toString(36).substring(2, 7)}`,
@@ -1048,11 +1049,11 @@ Only include prompts if they would be genuinely useful for the described functio
         }
       }
     }
-    
+
     // If we get here, something went wrong but we don't need to return a fallback
     console.log('No prompt templates were generated from the API');
     return [];
-    
+
   } catch (error) {
     console.error('Error generating MCP prompts:', error);
     return [];
@@ -1065,7 +1066,7 @@ Only include prompts if they would be genuinely useful for the described functio
  */
 export function createDefaultTools(description: string): MCPTool[] {
   const now = new Date().toISOString();
-  
+
   if (description.toLowerCase().includes('weather')) {
     return [{
       id: `tool-${Date.now()}`,
@@ -1133,7 +1134,7 @@ export function createDefaultTools(description: string): MCPTool[] {
       updatedAt: now
     }];
   }
-  
+
   // Default tool for general utility
   return [{
     id: `tool-${Date.now()}`,
@@ -1175,22 +1176,22 @@ export async function callMCPTool(
     if (serverId.startsWith('imported-') || serverId.startsWith('url-')) {
       // For non-database servers, we need to handle the MCP API call differently
       console.log(`Executing API call for tool ${toolName} on non-database server ${serverId}`);
-      
+
       // For these servers, we need to use locally stored tool definitions
       // Try to retrieve from localStorage
       const storedServers = localStorage.getItem('mcp-installed-servers');
       if (storedServers) {
         const servers = JSON.parse(storedServers);
         const server = servers.find((s: any) => s.id === serverId);
-        
+
         if (server) {
           console.log(`Found server ${serverId} in local storage`);
-          
+
           // For Playwright-related tools, create a proper API call to our MCP endpoint
-          if (serverId.includes('playwright') || 
-              toolName.includes('browser') || 
+          if (serverId.includes('playwright') ||
+              toolName.includes('browser') ||
               toolName.includes('playwright')) {
-                
+
             // Make an actual API call to our MCP endpoint
             try {
               const response = await fetch('/api/mcp/discover/execute', {
@@ -1204,20 +1205,20 @@ export async function callMCPTool(
                   parameters
                 }),
               });
-              
+
               if (!response.ok) {
                 throw new Error(`API call failed: ${response.statusText}`);
               }
-              
+
               const result = await response.json();
               return result;
-              
+
             } catch (error) {
               console.error('Error calling MCP endpoint:', error);
               throw error;
             }
           }
-          
+
           // Direct call to external MCP server based on stored tool info
           // This is a fallback response when we can't route the request properly
           return {
@@ -1228,30 +1229,30 @@ export async function callMCPTool(
           };
         }
       }
-      
+
       throw new Error(`Server ${serverId} not found in local storage`);
     }
-    
+
     // For database servers, query Supabase
     const { data: serverData, error: serverError } = await supabase
       .from('mcp_servers')
       .select('*')
       .eq('id', serverId)
       .single();
-      
+
     if (serverError) {
       throw new Error(`Server not found: ${serverError.message}`);
     }
-    
+
     if (!serverData) {
       throw new Error('Server not found');
     }
-    
+
     // Check if the server has expired
     if (serverData.expires_at && new Date(serverData.expires_at) < new Date()) {
       throw new Error('Server has expired. Please upgrade to premium for unlimited server time.');
     }
-    
+
     // Find the requested tool
     const { data: toolData, error: toolError } = await supabase
       .from('mcp_tools')
@@ -1259,11 +1260,11 @@ export async function callMCPTool(
       .eq('server_id', serverId)
       .eq('name', toolName)
       .single();
-      
+
     if (toolError) {
       throw new Error(`Tool not found: ${toolError.message}`);
     }
-    
+
     // Validate parameters against tool schema
     const toolParameters = toolData.parameters;
     for (const param of toolParameters) {
@@ -1300,14 +1301,14 @@ export async function callMCPTool(
             }
             break;
         }
-        
+
         // Enum validation
         if (param.enum && !param.enum.includes(value)) {
           throw new Error(`Parameter '${param.name}' must be one of: ${param.enum.join(', ')}`);
         }
       }
     }
-    
+
     // Generate the JSON-RPC 2.0 request message
     const jsonRpcRequest = {
       jsonrpc: '2.0',
@@ -1318,7 +1319,7 @@ export async function callMCPTool(
         parameters
       }
     };
-    
+
     // Process the tool call based on the tool name
     if (toolName === 'get_weather') {
       return await getWeather(parameters.location, parameters.units || 'metric');
@@ -1337,11 +1338,11 @@ export async function callMCPTool(
           jsonrpc: jsonRpcRequest
         }
       });
-      
+
       if (toolCallError) {
         throw new Error(`Failed to execute tool: ${toolCallError.message}`);
       }
-      
+
       return toolResult;
     }
   } catch (error) {
@@ -1362,65 +1363,65 @@ async function getWeather(location: string, units: string = 'metric'): Promise<a
     if (!weatherApiKey) {
       throw new Error('Weather API key is not configured');
     }
-    
+
     // Extract city name from more complex location descriptions
     const extractedLocation = extractCityName(location);
     console.log(`Weather query: Original="${location}", Extracted="${extractedLocation}"`);
-    
+
     // IMPORTANT: No hardcoded city values! Generate variations dynamically
     const generateVariations = (loc: string): string[] => {
       // Clean up the input
       const cleanLoc = loc.trim().replace(/\s+/g, ' ');
       const result: string[] = [cleanLoc]; // Start with the exact input
-      
+
       // Split by spaces and commas
       const parts = cleanLoc.split(/[\s,]+/).filter(p => p.length > 0);
-      
+
       // Add comma between city and region if it looks like "City Region"
       if (parts.length === 2) {
         // City could be first part, region second
         result.push(`${parts[0]},${parts[1]}`);
       }
-      
+
       // For multi-word cities with region, try several formats
       if (parts.length > 2) {
         // Last part might be a region code
         const possibleCity = parts.slice(0, -1).join(' ');
         const possibleRegion = parts[parts.length - 1];
         result.push(`${possibleCity},${possibleRegion}`);
-        
+
         // Or it could just be the first part as the main city
         result.push(parts[0]);
       }
-      
+
       // If it's just one word, just use that
       if (parts.length === 1) {
         result.push(parts[0]);
       }
-      
+
       // Return unique variations
       return Array.from(new Set(result));
     };
-    
+
     // Generate variations to try
     const variations = generateVariations(extractedLocation);
     console.log('Trying variations:', variations);
-    
+
     // Try each variation
     let data = null;
     let successful = false;
     let lastError = '';
     const attempts: string[] = [];
-    
+
     for (const cityName of variations) {
       attempts.push(cityName);
       try {
         console.log(`Trying: ${cityName}`);
-        
+
         const response = await fetch(
           `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cityName)}&units=${units}&appid=${weatherApiKey}`
         );
-        
+
         if (response.ok) {
           data = await response.json();
           successful = true;
@@ -1436,12 +1437,12 @@ async function getWeather(location: string, units: string = 'metric'): Promise<a
         lastError = err instanceof Error ? err.message : String(err);
       }
     }
-    
+
     // If nothing worked, throw descriptive error
     if (!successful || !data) {
       throw new Error(`Weather data not available. API did not recognize: ${attempts.join(', ')}`);
     }
-    
+
     // Format response according to MCP guidelines
     return {
       success: true,
@@ -1494,9 +1495,9 @@ async function getWeather(location: string, units: string = 'metric'): Promise<a
  * Helper function to get text representation of wind direction
  */
 function getWindDirection(degrees: number): string {
-  const directions = ['North', 'North-Northeast', 'Northeast', 'East-Northeast', 'East', 
-                     'East-Southeast', 'Southeast', 'South-Southeast', 'South', 
-                     'South-Southwest', 'Southwest', 'West-Southwest', 'West', 
+  const directions = ['North', 'North-Northeast', 'Northeast', 'East-Northeast', 'East',
+                     'East-Southeast', 'Southeast', 'South-Southeast', 'South',
+                     'South-Southwest', 'Southwest', 'West-Southwest', 'West',
                      'West-Northwest', 'Northwest', 'North-Northwest'];
   return directions[Math.round(degrees / 22.5) % 16];
 }
@@ -1511,15 +1512,15 @@ function calculateExpression(expression: string): any {
     if (!/^[0-9+\-*/(). ]+$/.test(expression)) {
       throw new Error('Invalid expression. Only numbers and basic operators are allowed.');
     }
-    
+
     // Use Function constructor instead of eval for better security
     // Note: this is still not completely secure for production use
     const result = Function(`'use strict'; return (${expression})`)();
-    
+
     if (typeof result !== 'number' || !isFinite(result)) {
       throw new Error('Invalid result');
     }
-    
+
     // Format response according to MCP guidelines
     return {
       success: true,
@@ -1575,51 +1576,51 @@ export async function listMCPServers(): Promise<MCPServer[]> {
       .select('*')
       .eq('is_public', true)
       .order('created_at', { ascending: false });
-      
+
     if (serversError) {
       console.error(`Supabase error: ${serversError.message}`);
       throw new Error(`Failed to fetch MCP servers: ${serversError.message}`);
     }
-    
+
     // Get tools for all servers
     const { data: toolsData, error: toolsError } = await supabase
       .from('mcp_tools')
       .select('*')
       .in('server_id', serversData.map((server: { id: any; }) => server.id));
-      
+
     if (toolsError) {
       console.error(`Failed to fetch tools: ${toolsError.message}`);
       throw new Error(`Failed to fetch MCP tools: ${toolsError.message}`);
     }
-    
+
     // Get resources for all servers
     const { data: resourcesData, error: resourcesError } = await supabase
       .from('mcp_resources')
       .select('*')
       .in('server_id', serversData.map((server: { id: any; }) => server.id));
-      
+
     if (resourcesError) {
       console.error(`Failed to fetch resources: ${resourcesError.message}`);
       throw new Error(`Failed to fetch MCP resources: ${resourcesError.message}`);
     }
-    
+
     // Get prompts for all servers
     const { data: promptsData, error: promptsError } = await supabase
       .from('mcp_prompts')
       .select('*')
       .in('server_id', serversData.map((server: { id: any; }) => server.id));
-      
+
     if (promptsError) {
       console.error(`Failed to fetch prompts: ${promptsError.message}`);
       throw new Error(`Failed to fetch MCP prompts: ${promptsError.message}`);
     }
-    
+
     // Map the data into the MCPServer format
     return serversData.map((server: { id: any; name: any; description: any; owner_id: any; created_at: any; updated_at: any; is_public: any; expires_at: any; schema_version: any; transport_types: any; capabilities: any; }) => {
       const serverTools = toolsData?.filter((tool: { server_id: any; }) => tool.server_id === server.id) || [];
       const serverResources = resourcesData?.filter((resource: { server_id: any; }) => resource.server_id === server.id) || [];
       const serverPrompts = promptsData?.filter((prompt: { server_id: any; }) => prompt.server_id === server.id) || [];
-      
+
       return {
         id: server.id,
         name: server.name,
@@ -1682,471 +1683,214 @@ function defaultServers(): MCPServer[] {
  * Creates REAL, PRODUCTION-READY implementation following MCP-SERVER-DEVS.md
  */
 export async function generateMCPServerCode(
-  description: string, 
+  description: string,
   tools: MCPTool[],
-  model: string = 'gemini-2.0-flash'
+  model: string = 'gemini-2.5-pro-exp-03-25'
 ): Promise<string> {
   try {
-    console.log('Generating REAL, NON-SIMULATED MCP server code for:', description);
-    
-    // Format tools for prompt
-    const formattedTools = tools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters.map(param => ({
-        name: param.name,
-        type: param.type,
-        description: param.description,
-        required: param.required,
-        enum: param.enum,
-        default: param.default
-      }))
-    }));
-    
-    // Format model name according to Gemini's API requirements
-    const formattedModel = model.includes('/') 
-      ? model 
-      : model.startsWith('gemini-') 
-        ? `models/${model.replace('gemini-', 'gemini/')}` 
-        : model;
+    console.log('Generating MCP server code for:', description);
 
-    // Create prompt for the LLM - STRICT instructions for real implementation
-    const prompt = `
-You are a senior TypeScript developer creating a REAL, PRODUCTION-READY MCP (Model Context Protocol) server.
+    // Import the templates helper
+    const {
+      generatePythonMCPServerCode,
+      generateUtilsCode,
+      generateDockerfile,
+      generateEnvExample
+    } = await import('./mcp-templates');
 
-USER REQUEST: "${description}"
+    // Generate default code using our templates
+    const defaultCode = generatePythonMCPServerCode(description, tools);
 
-TOOLS TO IMPLEMENT:
-${JSON.stringify(formattedTools, null, 2)}
-
-CRITICAL REQUIREMENTS:
-1. Create a 100% REAL, FUNCTIONAL TypeScript implementation - NOT A SIMULATION OR PLACEHOLDER
-2. Use REAL API calls for external services based on the tools required
-3. NEVER return fake/mock data or use comments like "// TODO" or "// Example implementation"
-4. FULLY implement each tool with actual business logic - not placeholders or simulations
-5. Use the @modelcontextprotocol/sdk package and zod for validation
-6. Request necessary API keys through proper environment variable configuration
-7. Handle errors appropriately with specific error messages
-8. Include a separate Dockerfile and docker-compose.yml for containerization
-
-Follow the structure from MCP-SERVER-DEVS.md:
-- Import @modelcontextprotocol/sdk and zod
-- Create server instance with name/version
-- Define proper parameter validation with zod
-- Implement REAL, FUNCTIONAL code for EACH tool (not simulations)
-- Create proper API clients for external services
-- Add comprehensive error handling
-- Set up proper transport (stdio or sse)
-- sse will use import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-- Create a main function to run the server
-
-Example of how to implement a REAL tool (adapt to the specific tools needed):
-
-\`\`\`typescript
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
-import fetch from "node-fetch";
-
-// Use real API for weather data
-const API_BASE = "https://api.example.com";
-const USER_AGENT = "mcp-server/1.0";
-
-const server = new McpServer({
-  name: "real-server",
-  version: "1.0.0",
-  capabilities: { tools: {} }
-});
-
-// Real implementation with actual API call
-server.tool(
-  "get-data", 
-  "Get real data from API",
-  {
-    param: z.string().describe("Parameter description")
-  },
-  async ({ param }) => {
-    // REAL implementation - not a simulation
-    const response = await fetch(\`\${API_BASE}/endpoint?param=\${encodeURIComponent(param)}\`, {
-      headers: { "User-Agent": USER_AGENT }
+    // Set up a safety timeout to ensure we return something
+    const timeoutPromise = new Promise<string>((resolve) => {
+      setTimeout(() => {
+        console.log('Code generation timeout reached, using default template');
+        resolve(defaultCode);
+      }, 12000);
     });
-    
-    if (!response.ok) {
-      throw new Error(\`API error: \${response.status}\`);
-    }
-    
-    const data = await response.json();
-    
-    return {
-      content: [{ type: "text", text: \`Real result: \${data.result}\` }]
-    };
-  }
-);
 
-// Main function
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-}
+    const codeGenPromise = async (): Promise<string> => {
+      try {
+        // Check if we're in a browser environment
+        if (typeof window === 'undefined') {
+          return defaultCode;
+        }
 
-main().catch(console.error);
-\`\`\`
+        // Check for API key
+        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        if (!apiKey) {
+          console.warn('API key not configured, using default template');
+          return defaultCode;
+        }
 
-Also include a proper Dockerfile:
+        // Format the model name
+        const formattedModel = model.includes('/')
+          ? model
+          : model.startsWith('gemini-')
+            ? `models/${model.replace('gemini-', 'gemini/')}`
+            : model;
 
-\`\`\`dockerfile
-FROM node:18-alpine
+        // Format the tools as a string for the prompt
+        const toolsString = tools.map(tool => {
+          const paramString = tool.parameters.map(p =>
+            `      ${p.name} (${p.type})${p.required ? ' [required]' : ''}: ${p.description}`
+          ).join('\n');
 
-WORKDIR /app
+          return `  - ${tool.name}: ${tool.description}
+    Parameters:
+${paramString}`;
+        }).join('\n\n');
 
-# Copy package files and install dependencies
-COPY package.json package-lock.json ./
-RUN npm ci
+        // Create a prompt based on the Mem0 template
+        const prompt = `Create a complete MCP (Model Context Protocol) server implementation in Python following the Anthropic MCP server specifications. This server will: "${description}"
 
-# Copy server code
-COPY server.ts tsconfig.json ./
+Use the FastMCP framework for implementing the server, following this structure:
+1. main.py with FastMCP server and tool implementations
+2. utils.py with helper functions for API integrations
+3. Proper error handling with try/except blocks
+4. Support for both SSE and stdio transport
+5. Environment variables for configuration
 
-# Build TypeScript
-RUN npm install -g typescript
-RUN tsc
+The server should implement the following tools:
 
-# Set environment variables (replace with actual values in production)
-ENV PORT=3000
+${toolsString}
 
-# Expose the MCP server port
-EXPOSE 3000
+Base your implementation on this structure from the Mem0 MCP server template:
 
-# Run the server
-CMD ["node", "server.js"]
-\`\`\`
+from mcp.server.fastmcp import FastMCP, Context
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from dotenv import load_dotenv
+import asyncio
+import json
+import os
 
-And a docker-compose.yml file:
+# Initialize FastMCP server
+mcp = FastMCP(
+    "server-name",
+    description="Server description",
+    lifespan=server_lifespan,
+    host=os.getenv("HOST", "0.0.0.0"),
+    port=os.getenv("PORT", "8050")
+)
 
-\`\`\`yaml
-version: '3'
-services:
-  mcp-server:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      # Add other environment variables needed by your implementation
-\`\`\`
+@mcp.tool()
+async def tool_name(ctx: Context, param_name: str) -> str:
+    """Tool description
 
-I need you to return:
-1. Complete TypeScript implementation (index.ts)
-2. A full Dockerfile
-3. A docker-compose.yml file
-4. package.json with all dependencies
-5. A simple README.md with setup instructions
-6. A .env.example file showing required environment variables
+    Args:
+        ctx: The MCP server context
+        param_name: Parameter description
+    """
+    try:
+        # Implement tool functionality
+        return json.dumps({"status": "success", "data": result})
+    except Exception as e:
+        return json.dumps({"status": "error", "message": str(e)})
 
-These should be in separate sections clearly labeled for each file. Each section should be surrounded by \`\`\` file markers.
-`;
+async def main():
+    transport = os.getenv("TRANSPORT", "sse")
+    if transport == 'sse':
+        await mcp.run_sse_async()
+    else:
+        await mcp.run_stdio_async()
 
-    // Make API call to generate REAL server code
-    try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: formattedModel,
-          prompt,
-          generationConfig: {
-            temperature: 0.1, // Lower temperature for more deterministic results
-            maxOutputTokens: 16384, // Allow larger outputs for complete implementations
-          }
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.candidates || data.candidates.length === 0) {
-        throw new Error('API response did not contain any candidates');
-      }
-      
-      let serverCode = data.candidates[0].content.parts[0].text;
-      
-      // Clean up code block syntax from the response but keep the file markers
-      serverCode = serverCode.trim();
-      
-      // Verify the code contains no simulation or mock patterns
-      // const simulationPatterns = [
-      //   "TODO: Implement",
-      //   "Example implementation",
-      //   "Successfully executed",
-      //   "simulation",
-      //   "mock",
-      //   "placeholder"
-      // ];
-      
-      // const containsSimulation = simulationPatterns.some(pattern => 
-      //   serverCode.toLowerCase().includes(pattern.toLowerCase())
-      // );
-      
-      // if (containsSimulation) {
-      //   console.warn("LLM generated code with simulation patterns. Regenerating...");
-        
-      //   // If we find simulation patterns, make one more attempt with stronger wording
-      //   const retryResponse = await fetch('/api/gemini', {
-      //     method: 'POST',
-      //     headers: { 'Content-Type': 'application/json' },
-      //     body: JSON.stringify({
-      //       model: formattedModel,
-      //       prompt: prompt + "\n\nIMPORTANT: YOUR PREVIOUS RESPONSE STILL CONTAINED SIMULATION CODE. DO NOT USE ANY PLACEHOLDER, SIMULATION OR MOCK IMPLEMENTATIONS. IMPLEMENT REAL API CALLS AND FULLY FUNCTIONAL CODE ONLY.",
-      //       generationConfig: {
-      //         temperature: 0.05,
-      //         maxOutputTokens: 16384,
-      //       }
-      //     })
-      //   });
-        
-      //   if (retryResponse.ok) {
-      //     const retryData = await retryResponse.json();
-      //     if (retryData.candidates && retryData.candidates.length > 0) {
-      //       serverCode = retryData.candidates[0].content.parts[0].text.trim();
-      //     }
-      //   }
-      // }
-      
-      console.log('Successfully generated REAL server code with LLM');
-      return serverCode;
-      
-    } catch (apiError) {
-      console.error('Error calling LLM API:', apiError);
-      
-      // Generate a more helpful error stub that includes a simple but functional implementation
-      // Include Docker setup even in the error case
-      return `# MCP Server Implementation
+if __name__ == "__main__":
+    asyncio.run(main())
 
-## SERVER CODE (index.ts)
-\`\`\`typescript
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { z } from "zod";
-import dotenv from "dotenv";
 
-// Load environment variables
-dotenv.config();
 
-// Initialize MCP server for: ${description}
-const server = new McpServer({
-  name: "${description.split(' ').slice(0, 3).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '-')}",
-  version: "1.0.0",
-  capabilities: { tools: {} }
-});
+For each tool, implement real functionality using appropriate APIs and integrations, not placeholder code.
+Include proper error handling with try/except blocks for all tools.
+Ensure all tools return properly formatted JSON responses.
 
-// Define tools based on the user request
-${tools.map(tool => `
-server.tool(
-  "${tool.name}",
-  "${tool.description}",
-  {
-    ${tool.parameters.map(param => `${param.name}: z.${param.type}().describe("${param.description}")`).join(',\n    ')}
-  },
-  async (params) => {
-    try {
-      // Basic implementation - replace with actual implementation
-      console.log("Executing ${tool.name} with params:", params);
-      return {
-        content: [{ 
-          type: "text", 
-          text: \`Executed ${tool.name} with parameters: \${JSON.stringify(params)}\` 
-        }]
-      };
-    } catch (error) {
-      console.error("Error executing ${tool.name}:", error);
-      throw new Error(\`Failed to execute ${tool.name}: \${error.message}\`);
-    }
-  }
-);`).join('\n')}
+Return ONLY the Python code without any markdown formatting, explanations, or comments outside the code.`;
 
-// Main function to start the server
-async function main() {
-  try {
-    // Use SSE transport if PORT is defined, otherwise fall back to stdio
-    if (process.env.PORT) {
-      const port = parseInt(process.env.PORT, 10) || 3000;
-      console.log(\`Starting MCP server on port \${port}\`);
-      const transport = new SSEClientTransport({ port });
-      await server.connect(transport);
-    } else {
-      console.log("Starting MCP server with stdio transport");
-      const transport = new StdioServerTransport();
-      await server.connect(transport);
-    }
-  } catch (error) {
-    console.error("Failed to start MCP server:", error);
-    process.exit(1);
-  }
-}
+        // Call the API via proxy
+        const response = await fetch('/api/gemini', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: formattedModel,
+            prompt: prompt,
+            generationConfig: {
+              temperature: 0.3,
+              topP: 0.95,
+              maxOutputTokens: 20000
+            }
+          })
+        });
 
-main().catch(console.error);
+        if (!response.ok) {
+          console.error('API error:', response.status);
+          return defaultCode;
+        }
+
+        const data = await response.json();
+
+        if (!data.candidates || data.candidates.length === 0 ||
+            !data.candidates[0].content || !data.candidates[0].content.parts ||
+            !data.candidates[0].content.parts[0] || !data.candidates[0].content.parts[0].text) {
+          console.error('Invalid API response format');
+          return defaultCode;
+        }
+
+        const generatedCode = data.candidates[0].content.parts[0].text.trim();
+
+        // Format the code as markdown with multiple files
+        // If it's already in markdown format, return it directly
+        if (generatedCode.includes('```python') || generatedCode.includes('```dockerfile')) {
+          return generatedCode;
+        }
+
+        // Otherwise, format it as markdown with multiple files
+        return `# MCP Server Implementation
+
+## main.py
+\`\`\`python
+${generatedCode}
 \`\`\`
 
 ## Dockerfile
 \`\`\`dockerfile
-FROM node:18-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy server code and config files
-COPY index.ts tsconfig.json .env* ./
+COPY . .
 
-# Build TypeScript
-RUN npm install -g typescript
-RUN tsc
-
-# Expose the MCP server port
-EXPOSE 3000
-
-# Run the server
-CMD ["node", "index.js"]
+CMD ["python", "main.py"]
 \`\`\`
 
-## docker-compose.yml
-\`\`\`yaml
-version: '3'
-services:
-  mcp-server:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      - NODE_ENV=production
-      # Add your API keys below
-    restart: unless-stopped
+## requirements.txt
 \`\`\`
-
-## package.json
-\`\`\`json
-{
-  "name": "mcp-server",
-  "version": "1.0.0",
-  "description": "MCP Server for ${description}",
-  "main": "index.js",
-  "type": "module",
-  "scripts": {
-    "build": "tsc",
-    "start": "node index.js",
-    "dev": "ts-node-esm index.ts"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.9.0",
-    "dotenv": "^16.3.1",
-    "node-fetch": "^3.3.2",
-    "zod": "^3.22.4"
-  },
-  "devDependencies": {
-    "@types/node": "^20.10.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
-  }
-}
-\`\`\`
-
-## tsconfig.json
-\`\`\`json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "esModuleInterop": true,
-    "outDir": "./",
-    "strict": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
-  },
-  "include": ["index.ts"],
-  "exclude": ["node_modules"]
-}
+mcp>=0.1.0
+python-dotenv>=0.19.0
+httpx>=0.24.0
 \`\`\`
 
 ## .env.example
 \`\`\`
-# Server configuration
-PORT=3000
-NODE_ENV=development
+TRANSPORT=sse
+PORT=8050
+HOST=0.0.0.0
+\`\`\``;
+      } catch (error) {
+        console.error('Error generating server code:', error);
+        return defaultCode;
+      }
+    };
 
-# Add your API keys below
-# OPENAI_API_KEY=your_openai_api_key
-# WEATHER_API_KEY=your_weather_api_key
-# DATABASE_URL=your_database_connection_string
-\`\`\`
-
-## README.md
-\`\`\`markdown
-# MCP Server for ${description}
-
-This is a Model Context Protocol (MCP) server implementation.
-
-## Quick Start with Docker
-
-1. Clone this repository
-2. Create a .env file based on .env.example
-3. Run with Docker Compose:
-
-\`\`\`bash
-docker-compose up -d
-\`\`\`
-
-## Manual Setup
-
-1. Install dependencies:
-
-\`\`\`bash
-npm install
-\`\`\`
-
-2. Build the TypeScript code:
-
-\`\`\`bash
-npm run build
-\`\`\`
-
-3. Start the server:
-
-\`\`\`bash
-npm start
-\`\`\`
-
-## Available Tools
-
-${tools.map(tool => `- **${tool.name}**: ${tool.description}`).join('\n')}
-
-## Environment Variables
-
-See .env.example for required environment variables.
-
-## License
-
-MIT
-\`\`\`
-`;
-    }
+    // Race the API request against the timeout
+    return await Promise.race([codeGenPromise(), timeoutPromise]);
   } catch (error) {
-    console.error('Error generating MCP server code:', error);
-    return `# Error in MCP Server Generation
-
-An error occurred while generating the MCP server code:
-
-\`\`\`
-${error instanceof Error ? error.message : String(error)}
-\`\`\`
-
-Please try again or contact support.
-`;
+    console.error('Error in generateMCPServerCode:', error);
+    // Fall back to our template-based code generation
+    const { generatePythonMCPServerCode } = await import('./mcp-templates');
+    return generatePythonMCPServerCode(description, tools);
   }
 }

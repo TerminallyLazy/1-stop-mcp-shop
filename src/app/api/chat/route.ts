@@ -20,7 +20,7 @@ const ALLOWED_MODELS = [
 
 export const POST = async (request: Request) => {
   try {
-    const { messages, model = 'gemini-2.0-flash' } = await request.json();
+    const { messages, model = 'gemini-2.5-pro-exp-03-25' } = await request.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(

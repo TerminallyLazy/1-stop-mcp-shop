@@ -51,8 +51,8 @@ export async function POST(request: NextRequest) {
     const payload = {
       model,
       messages,
-      temperature: temperature || 0.7,
-      max_tokens: max_tokens || 4096
+      temperature: temperature || 0.3,
+      max_tokens: max_tokens || 12000
     };
     
     // Forward the request to Anthropic API

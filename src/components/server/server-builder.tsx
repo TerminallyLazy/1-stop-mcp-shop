@@ -28,14 +28,14 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
   const [description, setDescription] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedTools, setGeneratedTools] = useState<MCPTool[]>([]);
-  const [selectedModel, setSelectedModel] = useState<SupportedModel>('gemini-2.0-flash');
+  const [selectedModel, setSelectedModel] = useState<SupportedModel>('gemini-2.5-pro-exp-03-25');
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [userInput, setUserInput] = useState("");
   const [serverResponse, setServerResponse] = useState<string | null>(null);
   const [generatedServerCode, setGeneratedServerCode] = useState<string | null>(null);
   const [buildProgress, setBuildProgress] = useState(0);
   const [isDeploymentModalOpen, setIsDeploymentModalOpen] = useState(false);
-  
+
   // For scrolling in the right panel
   const rightPanelMessagesRef = useRef<HTMLDivElement>(null);
 
@@ -54,9 +54,9 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
   ];
 
   const examples = [
-    { 
-      id: "calculator", 
-      name: "Smart Calculator", 
+    {
+      id: "calculator",
+      name: "Smart Calculator",
       description: "Math operations and unit conversions",
       category: "utilities",
       icon: "calculator"
@@ -97,9 +97,9 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
       icon: "translator"
     }
   ];
-  
-  const filteredExamples = selectedCategory === "all" 
-    ? examples 
+
+  const filteredExamples = selectedCategory === "all"
+    ? examples
     : examples.filter(example => example.category === selectedCategory);
 
   const handleExampleClick = (example: typeof examples[0]) => {
@@ -108,15 +108,15 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
 
   // Simulate progress animation for better UX
   const simulateProgress = (
-    startValue: number = 0, 
-    endValue: number = 90, 
+    startValue: number = 0,
+    endValue: number = 90,
     intervalSpeed: number = 100
   ) => {
     // Set initial value if provided
     if (startValue > 0) {
       setBuildProgress(startValue);
     }
-    
+
     // Clear any existing intervals to prevent multiple running simultaneously
     const intervalId = window.setInterval(() => {
       setBuildProgress(prev => {
@@ -124,7 +124,7 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
         // Slowdown as we approach end value
         const remaining = endValue - prev;
         const increment = Math.max(0.2, remaining * 0.1) * (Math.random() * 0.5 + 0.5);
-        
+
         if (prev >= endValue) {
           window.clearInterval(intervalId);
           return endValue; // Stop at endValue
@@ -132,26 +132,26 @@ export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
         return Math.min(prev + increment, endValue);
       });
     }, intervalSpeed);
-    
+
     // Store the interval ID for clearing later if needed
     return intervalId;
   };
 
   const handleGenerate = async () => {
     if (!description.trim()) return;
-    
+
     setIsGenerating(true);
     setServerResponse(null);
     setGeneratedServerCode(null);
     setGeneratedTools([]);
     setBuildProgress(0);
-    
+
     try {
       // Start progress animation
       simulateProgress(0, 25); // Phase 1: Initial analysis
-      
+
       // === Step 1: Get initial analysis from LLM ===
-      const initialSystemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers. 
+      const initialSystemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers.
 The user has requested an MCP server for: "${description}".
 
 Your task is to analyze this request and suggest appropriate tools that this MCP server should implement.
@@ -177,7 +177,7 @@ Be thorough but concise. Don't include any code yet.`;
           createdAt: new Date().toISOString()
         }
       ];
-      
+
       // Direct API call instead of using dynamic import
       const initialResponse = await fetch('/api/chat', {
         method: 'POST',
@@ -187,25 +187,25 @@ Be thorough but concise. Don't include any code yet.`;
           model: selectedModel
         })
       });
-      
+
       if (!initialResponse.ok) {
         throw new Error(`API call failed: ${initialResponse.status} ${initialResponse.statusText}`);
       }
-      
+
       const initialData = await initialResponse.json();
-      
+
       if (!initialData?.success && initialData?.error) {
         throw new Error(`API error: ${initialData.error}`);
       }
-      
+
       if (!initialData?.message?.content) {
         throw new Error("Failed to get initial response from LLM");
       }
-      
+
       // Store the server response to display in the right panel
       setServerResponse(initialData.message.content);
       simulateProgress(25, 40); // Phase 2: Generate tools
-      
+
       // === Step 2: Second LLM call to generate tools structure ===
       const secondSystemPrompt = `You are an AI engineering assistant specialized in generating MCP (Model Context Protocol) tools.
 The user has requested an MCP server for: "${description}".
@@ -213,7 +213,7 @@ The user has requested an MCP server for: "${description}".
 An initial analysis has been provided:
 ${initialData.message.content}
 
-Your task is to convert this analysis into structured JSON tool definitions following the MCP specification. 
+Your task is to convert this analysis into structured JSON tool definitions following the MCP specification.
 Each tool needs:
 1. A name in snake_case format
 2. A description explaining what the tool does
@@ -263,7 +263,7 @@ Return ONLY a JSON array of tools without any explanation or markdown. The array
           createdAt: new Date().toISOString()
         }
       ];
-      
+
       // Second LLM call - generate tool structure
       const toolsResponse = await fetch('/api/chat', {
         method: 'POST',
@@ -273,30 +273,30 @@ Return ONLY a JSON array of tools without any explanation or markdown. The array
           model: selectedModel
         })
       });
-      
+
       if (!toolsResponse.ok) {
         throw new Error(`API call failed: ${toolsResponse.status} ${toolsResponse.statusText}`);
       }
-      
+
       const toolsData = await toolsResponse.json();
-      
+
       if (!toolsData?.success && toolsData?.error) {
         throw new Error(`API error: ${toolsData.error}`);
       }
-      
+
       if (!toolsData?.message?.content) {
         throw new Error("Failed to get tools structure from LLM");
       }
-      
+
       // Parse JSON tools from response
       let tools: MCPTool[] = [];
       try {
         const toolsContent = toolsData.message.content;
         const jsonMatch = toolsContent.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        
+
         if (jsonMatch) {
           const parsedTools = JSON.parse(jsonMatch[0]);
-          
+
           if (Array.isArray(parsedTools) && parsedTools.length > 0) {
             // Process and format the tools
             const now = new Date().toISOString();
@@ -322,14 +322,14 @@ Return ONLY a JSON array of tools without any explanation or markdown. The array
         console.error("Error parsing tools JSON:", parseError);
         throw new Error("Failed to parse tools from LLM response");
       }
-      
+
       if (tools.length === 0) {
         throw new Error("No valid tools generated from LLM response");
       }
-      
+
       setGeneratedTools(tools);
       simulateProgress(40, 60); // Phase 3: Generate server code
-      
+
       // === Step 3: Generate Server Code ===
       try {
         console.log('Generating MCP server code...');
@@ -355,7 +355,7 @@ Return ONLY a JSON array of tools without any explanation or markdown. The array
         console.error('Error generating server code:', serverGenError);
         throw new Error("Failed to generate server code: " + serverGenError);
       }
-      
+
       // === Step 4: Generate final summary message ===
       const finalSystemPrompt = `You are an AI engineering assistant specialized in building MCP (Model Context Protocol) servers.
 The user has requested an MCP server for: "${description}".
@@ -389,7 +389,7 @@ Be comprehensive but well-structured with clear headers for each section. This s
           createdAt: new Date().toISOString()
         }
       ];
-      
+
       // Final LLM call - comprehensive summary
       const finalResponse = await fetch('/api/chat', {
         method: 'POST',
@@ -399,43 +399,43 @@ Be comprehensive but well-structured with clear headers for each section. This s
           model: selectedModel
         })
       });
-      
+
       if (!finalResponse.ok) {
         throw new Error(`API call failed: ${finalResponse.status} ${finalResponse.statusText}`);
       }
-      
+
       const finalData = await finalResponse.json();
-      
+
       if (!finalData?.success && finalData?.error) {
         throw new Error(`API error: ${finalData.error}`);
       }
-      
+
       if (!finalData?.message?.content) {
         throw new Error("Failed to generate final summary");
       }
-      
+
       // Update the server response with the final comprehensive summary
       setServerResponse(finalData.message.content);
-      
+
       // Complete the progress bar
       simulateProgress(85, 100);
       setBuildProgress(100);
-      
+
       // Call the callback if provided to pass tools to parent component
       if (onToolsGenerated && tools.length > 0) {
         onToolsGenerated(tools, description);
       }
     } catch (error) {
       console.error("Error during MCP server generation:", error);
-      
+
       // Show error in right panel
       setServerResponse(`## Error Building MCP Server
 
-I encountered an error while building your MCP server: 
+I encountered an error while building your MCP server:
 ${error instanceof Error ? error.message : String(error)}
 
 Please try again with a more specific description or different requirements.`);
-      
+
       // Reset progress bar
       setBuildProgress(0);
     } finally {
@@ -511,10 +511,10 @@ Please try again with a more specific description or different requirements.`);
 
     // Store the input for potential tool generation
     setDescription(userInput);
-    
+
     // Send the message through the chat system
     await sendMessage(userInput);
-    
+
     // Clear input field
     setUserInput('');
   };
@@ -525,7 +525,7 @@ Please try again with a more specific description or different requirements.`);
       <div className="border rounded-lg flex flex-col overflow-hidden w-full lg:col-span-1">
         <div className="bg-primary/5 p-3 border-b flex justify-between items-center">
           <h3 className="font-medium">Chat with AI to Build Your MCP Server</h3>
-          <select 
+          <select
             className="text-sm border rounded px-2 py-1 bg-background"
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value as SupportedModel)}
@@ -587,7 +587,7 @@ Please try again with a more specific description or different requirements.`);
                   </div>
                 </div>
               ))}
-              
+
               {/* Thinking animation */}
               {isLoading && (
                 <div className="flex justify-start">
@@ -606,12 +606,12 @@ Please try again with a more specific description or different requirements.`);
             </>
           )}
         </div>
-        
+
         {/* Input area */}
         <form onSubmit={handleMessageSubmit} className="border-t p-3 flex gap-2">
-          <Input 
-            value={userInput} 
-            onChange={(e) => setUserInput(e.target.value)} 
+          <Input
+            value={userInput}
+            onChange={(e) => setUserInput(e.target.value)}
             placeholder="Describe the tools you want..."
             className="flex-1"
             disabled={isLoading || isGenerating}
@@ -631,27 +631,27 @@ Please try again with a more specific description or different requirements.`);
           </Button>
         </form>
       </div>
-      
+
       {/* Right Side - Tools Panel */}
       <div className="border rounded-lg flex flex-col overflow-hidden w-full">
         <div className="bg-primary/5 p-3 border-b flex justify-between items-center">
           <h3 className="font-medium">MCP Tools</h3>
-          
+
           <div className="flex items-center gap-2">
             {/* Progress bar */}
             {isGenerating || buildProgress > 0 ? (
               <div className="w-24 bg-gray-200 rounded-full h-2.5 mr-2">
-                <div 
-                  className="bg-primary h-2.5 rounded-full transition-all duration-300" 
+                <div
+                  className="bg-primary h-2.5 rounded-full transition-all duration-300"
                   style={{ width: `${buildProgress}%` }}
                 ></div>
               </div>
             ) : null}
-            
+
             {generatedTools.length > 0 && buildProgress === 100 && (
               <>
-                <Button 
-                  size="sm" 
+                <Button
+                  size="sm"
                   onClick={() => {
                     if (typeof onToolsGenerated === 'function') {
                       onToolsGenerated(generatedTools, description);
@@ -661,10 +661,10 @@ Please try again with a more specific description or different requirements.`);
                 >
                   Save
                 </Button>
-                
-                <Button 
-                  size="sm" 
-                  onClick={() => setIsDeploymentModalOpen(true)} 
+
+                <Button
+                  size="sm"
+                  onClick={() => setIsDeploymentModalOpen(true)}
                   className="text-xs bg-green-600 hover:bg-green-700 text-white"
                 >
                   Deploy
@@ -673,7 +673,7 @@ Please try again with a more specific description or different requirements.`);
             )}
           </div>
         </div>
-        
+
         {/* Tools and server response display area */}
         <div className="flex-1 overflow-y-auto p-3" ref={rightPanelMessagesRef}>
           {!serverResponse && !isGenerating && generatedTools.length === 0 ? (
@@ -733,7 +733,7 @@ Please try again with a more specific description or different requirements.`);
                   </ReactMarkdown>
                 </div>
               )}
-              
+
               {/* Generated Tools Display */}
               {generatedTools.length > 0 && (
                 <div className="mt-6">
@@ -783,12 +783,12 @@ Please try again with a more specific description or different requirements.`);
                   </div>
                 </div>
               )}
-              
+
               {/* Generated Server Code Display */}
               {generatedServerCode && (
                 <div className="mt-6">
                   <h2 className="text-lg font-bold mb-4 border-b pb-2">Generated MCP Server Implementation</h2>
-                  
+
                   {/* Check if the generatedServerCode starts with a markdown-style header */}
                   {generatedServerCode.startsWith('#') ? (
                     <ReactMarkdown
@@ -821,7 +821,7 @@ Please try again with a more specific description or different requirements.`);
                       <pre className="text-sm font-mono whitespace-pre-wrap">{generatedServerCode}</pre>
                     </div>
                   )}
-                  
+
                   {/* Docker run command and deployment instructions */}
                   <div className="mt-6 p-4 bg-green-500/10 rounded-lg border border-green-200 dark:border-green-900">
                     <h3 className="font-medium mb-2 flex items-center gap-2">
@@ -832,11 +832,11 @@ Please try again with a more specific description or different requirements.`);
                       Quick Docker Deployment
                     </h3>
                     <p className="text-sm mb-3">Run these commands to deploy your MCP server with Docker:</p>
-                    
+
                     <div className="bg-gray-800 rounded p-3 text-gray-100 font-mono text-sm mb-3">
                       <div className="flex justify-between">
                         <code>docker-compose up -d</code>
-                        <button 
+                        <button
                           className="text-xs bg-gray-700 hover:bg-gray-600 px-2 rounded"
                           onClick={() => {
                             navigator.clipboard.writeText('docker-compose up -d');
@@ -846,7 +846,7 @@ Please try again with a more specific description or different requirements.`);
                         </button>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10" />
@@ -854,8 +854,8 @@ Please try again with a more specific description or different requirements.`);
                       </svg>
                       <span>Automatically builds and runs your server with all files and dependencies</span>
                     </div>
-                    
-                    <Button 
+
+                    <Button
                       className="w-full mt-4 bg-green-600 hover:bg-green-700 text-white"
                       size="sm"
                       onClick={() => setIsDeploymentModalOpen(true)}
@@ -868,12 +868,12 @@ Please try again with a more specific description or different requirements.`);
             </div>
           )}
         </div>
-        
+
         {/* Action buttons for empty state */}
         {!isGenerating && !serverResponse && generatedTools.length === 0 && (
           <div className="border-t p-3">
-            <Button 
-              className="w-full" 
+            <Button
+              className="w-full"
               onClick={handleGenerate}
               disabled={isGenerating || !description.trim()}
             >
@@ -890,10 +890,10 @@ Please try again with a more specific description or different requirements.`);
           </div>
         )}
       </div>
-      
+
       {/* Deployment Modal */}
       {generatedServerCode && (
-        <DeploymentModal 
+        <DeploymentModal
           isOpen={isDeploymentModalOpen}
           onClose={() => setIsDeploymentModalOpen(false)}
           serverCode={generatedServerCode}

@@ -1,0 +1,36 @@
+OBOOOimport {
+  ToaBOBOBOBst,
+  ToastCloseO,
+  ToastDescriOption,
+  ToastProvideOBOr,
+  ToastTitle,O
+  ToastViewporBOt,
+} from "../../components/ui/toast"
+import { useToasBt } from "../../components/ui/use-toast"
+O
+export function Toaster() {
+ O const { toasts } = useToast()
+B
+  return (
+ y
+
+
+n   <ToastProvider>
+      {toasts.map(function ({ id, title, description, action, ...props }) {
+        return (
+          <Toast key={id} {...props}>
+            <div className="grid gap-1">
+              {title && <ToastTitle>{title}</ToastTitle>}
+              {description && (
+                <ToastDescription>{description}</ToastDescription>
+              )}
+            </div>
+            {action}
+            <ToastClose />
+          </Toast>
+        )
+      })}
+      <ToastViewport />
+    </ToastProvider>
+  )
+}

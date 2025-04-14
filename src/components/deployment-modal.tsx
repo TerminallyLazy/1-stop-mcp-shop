@@ -51,63 +51,63 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
   const [error, setError] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [activeFileTab, setActiveFileTab] = useState<string>("");
-  
+
   // Parse server code to extract files and env vars when the modal opens
   useEffect(() => {
     if (isOpen && serverCode) {
       try {
         // Extract files from markdown code blocks
         const extractedFiles = extractCodeBlocksFromMarkdown(serverCode);
-        
+
         // Check if tsconfig.json exists, add it if it doesn't
         const hasTsConfig = extractedFiles.some(file => file.filename === 'tsconfig.json');
         if (!hasTsConfig) {
           // Check if there are any TypeScript files (.ts or .tsx)
-          const hasTypeScriptFiles = extractedFiles.some(file => 
+          const hasTypeScriptFiles = extractedFiles.some(file =>
             file.filename.endsWith('.ts') || file.filename.endsWith('.tsx')
           );
-          
+
           // Add a default tsconfig.json if we have TypeScript files
           if (hasTypeScriptFiles) {
             // Ensure the filename doesn't conflict with existing files
             let tsConfigFilename = 'tsconfig.json';
-            
+
             // Check if this filename will conflict with any existing entries
             if (extractedFiles.some(file => file.filename === tsConfigFilename)) {
               console.warn('Unexpected conflict: tsconfig.json already exists with different casing or as another file');
               tsConfigFilename = 'tsconfig.generated.json';
             }
-            
+
             extractedFiles.push({
               filename: tsConfigFilename,
               content: JSON.stringify(DEFAULT_TSCONFIG, null, 2)
             });
           }
         }
-        
+
         // Check if package-lock.json exists, add it if it doesn't
         const hasPackageLock = extractedFiles.some(file => file.filename === 'package-lock.json');
         if (!hasPackageLock) {
           // Check if there's a package.json file (Node.js project)
           const hasPackageJson = extractedFiles.some(file => file.filename === 'package.json');
-          
+
           // Add a default package-lock.json if we have a package.json
           if (hasPackageJson) {
             // Generate package-lock.json with project name from package.json if possible
             let packageName = 'mcp-server';
             let packageVersion = '1.0.0';
-            
+
             try {
               const packageJsonFile = extractedFiles.find(file => file.filename === 'package.json');
               if (packageJsonFile) {
                 const packageJson = JSON.parse(packageJsonFile.content);
                 packageName = packageJson.name || packageName;
                 packageVersion = packageJson.version || packageVersion;
-                
+
                 // Extract dependencies from package.json
                 const dependencies = packageJson.dependencies || {};
                 const devDependencies = packageJson.devDependencies || {};
-                
+
                 // Update the package lock with actual dependencies
                 const packageLock: {
                   name: string;
@@ -115,7 +115,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   lockfileVersion: number;
                   requires: boolean;
                   packages: Record<string, any>;
-                } = { 
+                } = {
                   ...DEFAULT_PACKAGE_LOCK,
                   name: packageName,
                   version: packageVersion,
@@ -128,7 +128,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                     }
                   }
                 };
-                
+
                 // Add each dependency to the packages section
                 Object.entries(dependencies).forEach(([name, version]) => {
                   packageLock.packages[`node_modules/${name}`] = {
@@ -138,7 +138,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                     dependencies: {}
                   };
                 });
-                
+
                 extractedFiles.push({
                   filename: 'package-lock.json',
                   content: JSON.stringify(packageLock, null, 2)
@@ -146,7 +146,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
               }
             } catch (e) {
               console.warn('Failed to parse package.json', e);
-              
+
               extractedFiles.push({
                 filename: 'package-lock.json',
                 content: JSON.stringify(DEFAULT_PACKAGE_LOCK, null, 2)
@@ -154,25 +154,25 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
             }
           }
         }
-        
+
         setFiles(extractedFiles);
-        
+
         // Find the .env.example file to extract variables
         const envExampleFile = extractedFiles.find((f: { filename: string; content: string }) => f.filename === '.env.example');
         if (envExampleFile) {
           const vars = extractEnvVarsFromExample(envExampleFile.content);
           setEnvVars(vars);
         }
-        
+
         // Set default project name based on server name
         const sanitizedName = serverName
           .toLowerCase()
           .replace(/[^a-z0-9-]/g, '-')
           .replace(/-+/g, '-')
           .replace(/^-|-$/g, '');
-          
+
         setProjectName(sanitizedName || 'mcp-server');
-        
+
         // Set the first file as active by default
         if (extractedFiles.length > 0) {
           setActiveFileTab(extractedFiles[0].filename);
@@ -183,22 +183,22 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
       }
     }
   }, [isOpen, serverCode, serverName]);
-  
+
   // Handle form submission for deployment
   const handleDeploy = async () => {
     try {
       setStatus("preparing");
       setError(null);
-      
+
       if (!projectName.trim()) {
         setError("Project name is required");
         setStatus("idle");
         return;
       }
-      
+
       // Start deployment
       setStatus("deploying");
-      
+
       // Call the deployment API
       const response = await fetch('/api/mcp/deploy', {
         method: 'POST',
@@ -211,13 +211,13 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
           envVars
         }),
       });
-      
+
       const result = await response.json();
-      
+
       if (!response.ok || !result.success) {
         throw new Error(result.error || 'Deployment failed');
       }
-      
+
       setDeploymentResult(result);
       setStatus("success");
     } catch (error) {
@@ -226,7 +226,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
       setStatus("error");
     }
   };
-  
+
   // Handle env var change
   const handleEnvVarChange = (key: string, value: string) => {
     setEnvVars(prev => ({
@@ -234,7 +234,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
       [key]: value
     }));
   };
-  
+
   return (
     <Dialog open={isOpen} onOpenChange={(open: boolean) => !open && onClose()}>
       <DialogContent className="max-w-[75vw] w-[98vw] max-h-[95vh] h-[95vh] overflow-y-auto p-2 md:p-4">
@@ -244,7 +244,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
             Configure and deploy your MCP server with Docker.
           </DialogDescription>
         </DialogHeader>
-        
+
         {status === "idle" || status === "preparing" ? (
           <>
             <div className="grid gap-6">
@@ -257,7 +257,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   placeholder="Enter a name for your project"
                 />
               </div>
-              
+
               <div className="grid gap-3">
                 <Label>Files to Deploy</Label>
                 <div className="border rounded-md">
@@ -275,7 +275,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                         ))}
                       </TabsList>
                     </div>
-                    
+
                     {files.map((file) => (
                       <TabsContent key={file.filename} value={file.filename} className="p-4">
                         <pre className="bg-gray-800 text-gray-200 p-4 rounded-md overflow-auto max-h-[400px] text-sm">
@@ -286,7 +286,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   </Tabs>
                 </div>
               </div>
-              
+
               {Object.keys(envVars).length > 0 && (
                 <div className="grid gap-3">
                   <Label>Environment Variables</Label>
@@ -308,13 +308,13 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                 </div>
               )}
             </div>
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={onClose}>
                 Cancel
               </Button>
-              <Button 
-                onClick={handleDeploy} 
+              <Button
+                onClick={handleDeploy}
                 disabled={status === "preparing"}
                 className="bg-green-600 hover:bg-green-700 text-white"
               >
@@ -340,9 +340,9 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                 </svg>
               </div>
             </div>
-            
+
             <h2 className="text-2xl font-bold text-center mb-6">Deployment Successful!</h2>
-            
+
             <div className="grid gap-4">
               <Alert className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
                 <AlertTitle className="text-green-700 dark:text-green-300">Server Deployed</AlertTitle>
@@ -350,7 +350,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   Your MCP server is now running on Docker.
                 </AlertDescription>
               </Alert>
-              
+
               <div className="border rounded-md p-4">
                 <h3 className="font-medium mb-2">Deployment Details</h3>
                 <div className="grid gap-2">
@@ -366,7 +366,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   </div>
                 </div>
               </div>
-              
+
               <div className="border rounded-md p-4">
                 <h3 className="font-medium mb-2">Docker Status</h3>
                 <pre className="bg-black text-green-400 p-3 rounded-md text-xs overflow-auto max-h-[150px]">
@@ -374,7 +374,7 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                 </pre>
               </div>
             </div>
-            
+
             <DialogFooter className="mt-6">
               <Button onClick={onClose}>Close</Button>
             </DialogFooter>
@@ -390,32 +390,32 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                 </svg>
               </div>
             </div>
-            
+
             <h2 className="text-2xl font-bold text-center mb-6">Deployment Failed</h2>
-            
+
             <Alert className="bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
               <AlertTitle className="text-red-700 dark:text-red-300">Error</AlertTitle>
               <AlertDescription className="text-red-600 dark:text-red-400">
                 {error || "An unknown error occurred during deployment."}
               </AlertDescription>
             </Alert>
-            
+
             {error && error.includes('Docker Compose is not installed') && (
               <div className="mt-4 border rounded-md p-4">
                 <h3 className="font-medium mb-2">Installation Instructions</h3>
                 <p className="mb-2">Docker Compose wasn't detected by the system. This could be because:</p>
-                
+
                 <ul className="list-disc pl-5 mb-4 space-y-1">
                   <li>Docker Compose is not installed</li>
                   <li>Docker Compose is installed but not in your system PATH</li>
                   <li>You're using newer Docker with the plugin version (<code>docker compose</code> vs <code>docker-compose</code>)</li>
                 </ul>
-                
+
                 <div className="bg-gray-800 text-gray-200 p-4 rounded-md overflow-auto text-sm mt-3">
                   <h4 className="text-sm font-bold mb-2">Verify your installation:</h4>
                   <pre className="mb-2">docker compose version</pre>
                   <pre className="mb-2">docker-compose --version</pre>
-                  
+
                   <h4 className="text-sm font-bold mb-2 mt-4">For Linux:</h4>
                   <pre className="mb-2">sudo apt-get update && sudo apt-get install docker-compose-plugin</pre>
                   <h4 className="text-sm font-bold mb-2">macOS:</h4>
@@ -423,28 +423,28 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
                   <h4 className="text-sm font-bold mb-2">Windows:</h4>
                   <pre>Install Docker Desktop which includes Docker Compose</pre>
                 </div>
-                
+
                 <p className="mt-4 text-sm text-muted-foreground">
                   For more information, visit the <a href="https://docs.docker.com/compose/install/" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Docker Compose installation guide</a>.
                 </p>
               </div>
             )}
-            
+
             {error && error.includes('npm ci') && (
               <div className="mt-4 border rounded-md p-4">
                 <h3 className="font-medium mb-2">NPM Installation Error</h3>
                 <p className="mb-2">The npm ci command failed during Docker deployment. This could be because:</p>
-                
+
                 <ul className="list-disc pl-5 mb-4 space-y-1">
                   <li>The package.json is missing required dependencies</li>
                   <li>The package-lock.json doesn't match the package.json</li>
                   <li>There are private npm packages that require authentication</li>
                 </ul>
-                
+
                 <p className="mt-2">A default Dockerfile has been added that uses <code>npm install</code> instead of <code>npm ci</code>, which should be more forgiving with package-lock.json discrepancies.</p>
               </div>
             )}
-            
+
             <DialogFooter className="mt-6">
               <Button variant="outline" onClick={() => setStatus("idle")}>
                 Try Again
@@ -456,4 +456,4 @@ export function DeploymentModal({ isOpen, onClose, serverCode, serverName }: Dep
       </DialogContent>
     </Dialog>
   );
-} 
+}

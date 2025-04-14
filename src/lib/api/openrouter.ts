@@ -212,8 +212,8 @@ export async function callOpenRouterAPI(messages: ChatMessage[], model: string =
     const requestData: OpenRouterRequest = {
       model: fixedModel,
       messages: openRouterMessages,
-      temperature: 0.7,
-      max_tokens: 2048
+      temperature: 0.3,
+      max_tokens: 12000
       // Don't use route parameter as it only accepts 'direct' or 'fallback'
     };
 

@@ -158,8 +158,8 @@ export async function callAnthropicAPI(messages: ChatMessage[], model: string = 
     const requestData: AnthropicRequest = {
       model: fixedModel,
       messages: anthropicMessages,
-      temperature: 0.7,
-      max_tokens: 4096
+      temperature: 0.3,
+      max_tokens: 12000
     };
     
     // Add system prompt as a top-level parameter if present

@@ -11,7 +11,7 @@ import { callMCPTool } from "../../lib/api/mcp";
 import { ChatMessage, MCPServer, MCPTool } from "../../lib/types";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "../../components/ui/dialog";
 import { Label } from "../../components/ui/label";
-import { X } from "lucide-react";
+// import { X } from "lucide-react";
 
 // Storage key for localStorage
 const MCP_SERVERS_STORAGE_KEY = 'mcp-connected-servers';
@@ -20,7 +20,7 @@ export function MCPClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-2.5-pro-exp-03-25");
   const [selectedServer, setSelectedServer] = useState<MCPServer | null>(null);
   const [connectedServers, setConnectedServers] = useState<MCPServer[]>([]);
   const [isServerDetailsOpen, setIsServerDetailsOpen] = useState(false);
@@ -254,9 +254,9 @@ export function MCPClient() {
                   </div>
                 </Button>
                 <Button 
-                  variant={selectedModel === "gemini-2.0-pro" ? "default" : "outline"} 
+                  variant={selectedModel === "gemini-2.5-pro-exp-03-25" ? "default" : "outline"} 
                   className="w-full justify-start"
-                  onClick={() => setSelectedModel("gemini-2.0-pro")}
+                  onClick={() => setSelectedModel("gemini-2.5-pro-exp-03-25")}
                 >
                   <div className="text-left">
                     <div className="font-medium">Gemini 2.0 Pro</div>

@@ -11,7 +11,9 @@ import { ChatMessage, MCPServer, ToolCall } from "../../lib/types";
 import { listMCPServers } from "../../lib/api/mcp";
 import { getUserSession } from "../../lib/supabase";
 import { createFollowUpPrompt } from "../../lib/utils/tool-handler";
-import { X } from "lucide-react";
+// import { X } from "lucide-react";
+
+
 
 // New component for server details modal
 interface ServerDetailsModalProps {
@@ -99,7 +101,7 @@ export function EnhancedMCPClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-2.5-pro-exp-03-25");
   const [availableServers, setAvailableServers] = useState<MCPServer[]>([]);
   const [installedServers, setInstalledServers] = useState<MCPServer[]>([]);
   const [showServerDialog, setShowServerDialog] = useState(false);
