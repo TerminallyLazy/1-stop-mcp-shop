@@ -12,7 +12,7 @@ import {
 export async function generateMCPServerDeployment(
   description: string,
   tools: MCPTool[],
-  model: string = 'gemini-2.5-pro-exp-03-25'
+  model: string = 'gemini-2.0-flash'
 ): Promise<{
   files: { 
     filename: string; 

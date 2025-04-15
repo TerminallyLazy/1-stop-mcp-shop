@@ -10,7 +10,7 @@ interface UseChatProps {
   model?: 'claude-3-7-sonnet-20250219' | 'gemini-2.5-pro-exp-03-25' | 'gemini-2.0-flash';
 }
 
-export function useChat({ onResponse, model = 'gemini-2.5-pro-exp-03-25' }: UseChatProps = {}) {
+export function useChat({ onResponse, model = 'gemini-2.0-flash' }: UseChatProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 

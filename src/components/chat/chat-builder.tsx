@@ -42,7 +42,7 @@ export function ChatBuilder({ onToolsGenerated }: ChatBuilderProps) {
       let tools: MCPTool[];
       try {
         console.log('Generating tools with API...');
-        tools = await generateMCPTools(query, "gemini-2.5-pro-exp-03-25");
+        tools = await generateMCPTools(query, "gemini-2.0-flash");
       } catch (apiError) {
         console.error('Error with API call, using default tools:', apiError);
         tools = createDefaultTools(query);
@@ -214,7 +214,7 @@ Your responses should include specific code examples when relevant and focus on 
       const { callGeminiAPI } = await import('../../lib/api/gemini');
       const response = await callGeminiAPI(
         formattedMessages,
-        'gemini-2.5-pro-exp-03-25'
+        'gemini-2.0-flash'
       );
       
       const responseContent = response?.message?.content || "I'm sorry, I couldn't generate a response. Let's continue building your MCP server.";
@@ -334,7 +334,7 @@ Your responses should include specific code examples when relevant and focus on 
       const deployment = await generateMCPServerDeployment(
         serverDescription || "Custom MCP Server",
         generatedTools,
-        "gemini-2.5-pro-exp-03-25"
+        "gemini-2.0-flash"
       );
       
       // Create a zip file containing all generated files

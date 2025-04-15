@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { generateMCPServerCode } from '../../../../lib/api/mcp';
 import { MCPTool } from '../../../../lib/types';
+import { generatePythonMCPServerCode } from '../../../../lib/api/mcp-templates';
 
 export const POST = async (request: Request) => {
   try {
@@ -21,10 +21,9 @@ export const POST = async (request: Request) => {
     }
 
     // Call the MCP server code generator
-    const code = await generateMCPServerCode(
+    const code = await generatePythonMCPServerCode(
       description,
-      tools as MCPTool[],
-      model || 'gemini-2.5-pro-exp-03-25'
+      tools as MCPTool[]
     );
 
     return NextResponse.json({ code });

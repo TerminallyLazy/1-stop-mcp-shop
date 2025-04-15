@@ -1,0 +1,31 @@
+name: Question
+description: Ask a question about this project
+title: "[QUESTION] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use this template to ask a clear and concise question about the project.
+
+  - type: input
+    id: question
+    attributes:
+      label: Question
+      description: A clear and concise question about the project.
+      placeholder: Enter your question here.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Provide context or background information related to your question.
+      placeholder: Enter context or background information here.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Add any other context or screenshots related to your question here.
+      placeholder: Enter additional context or screenshots here.

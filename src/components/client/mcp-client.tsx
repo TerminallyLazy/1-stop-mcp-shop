@@ -20,7 +20,7 @@ export function MCPClient() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-pro-exp-03-25");
+  const [selectedModel, setSelectedModel] = useState("gemini-2.0-flash"); // Default model
   const [selectedServer, setSelectedServer] = useState<MCPServer | null>(null);
   const [connectedServers, setConnectedServers] = useState<MCPServer[]>([]);
   const [isServerDetailsOpen, setIsServerDetailsOpen] = useState(false);

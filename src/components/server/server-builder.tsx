@@ -11,6 +11,15 @@ import { useChat } from "../../lib/hooks/use-chat";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { DeploymentModal } from "../deployment-modal";
+import {
+  Stepper,
+  StepperItem,
+  StepperTrigger,
+  StepperIndicator,
+  StepperTitle,
+  StepperDescription,
+  StepperSeparator
+} from "../../components/ui/stepper";
 
 interface Message {
   role: 'user' | 'ai';
@@ -22,13 +31,31 @@ interface ServerBuilderProps {
   onToolsGenerated?: (tools: MCPTool[], description: string) => void;
 }
 
-type SupportedModel = 'claude-3-7-sonnet-20250219' | 'gemini-2.5-pro-exp-03-25' | 'gemini-2.0-flash';
+type SupportedModel = 'claude-3-7-sonnet-20250219' | 'gemini-2.0-flash' | 'gemini-2.0-flash';
 
 export function ServerBuilder({ onToolsGenerated }: ServerBuilderProps) {
+  // Stepper steps for file generation progress
+  const stepperSteps = [
+    { step: 1, title: "Describe", description: "Describe your MCP server" },
+    { step: 2, title: "Analyze", description: "LLM analyzes requirements" },
+    { step: 3, title: "Tools", description: "Tools are generated" },
+    { step: 4, title: "Server Code", description: "Server code is generated" },
+    { step: 5, title: "Summary", description: "Final summary & deploy" }
+  ];
+
+  // Map buildProgress (0-100) to step index
+  const progressToStep = (progress: number) => {
+    if (progress < 20) return 1;
+    if (progress < 40) return 2;
+    if (progress < 60) return 3;
+    if (progress < 85) return 4;
+    return 5;
+  };
+
   const [description, setDescription] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedTools, setGeneratedTools] = useState<MCPTool[]>([]);
-  const [selectedModel, setSelectedModel] = useState<SupportedModel>('gemini-2.5-pro-exp-03-25');
+  const [selectedModel, setSelectedModel] = useState<SupportedModel>('gemini-2.0-flash');
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [userInput, setUserInput] = useState("");
   const [serverResponse, setServerResponse] = useState<string | null>(null);
@@ -520,7 +547,7 @@ Please try again with a more specific description or different requirements.`);
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-[calc(95vh-12rem)] max-w-[1900px] mx-auto w-full px-2">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-[calc(109vh-12rem)] max-w-[1900px] mx-auto w-full px-2">
       {/* Left Side - Chat Interface */}
       <div className="border rounded-lg flex flex-col overflow-hidden w-full lg:col-span-1">
         <div className="bg-primary/5 p-3 border-b flex justify-between items-center">
@@ -534,6 +561,25 @@ Please try again with a more specific description or different requirements.`);
             <option value="gemini-2.5-pro-exp-03-25">Gemini 2.5 Pro</option>
             <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
           </select>
+        </div>
+        {/* Stepper Progress UI */}
+        <div className="px-4 py-2 border-b bg-background">
+          <Stepper value={progressToStep(buildProgress)} orientation="vertical">
+            {stepperSteps.map(({ step, title, description }) => (
+              <StepperItem key={step} step={step} className="relative items-start [&:not(:last-child)]:flex-1">
+                <StepperTrigger className="items-start pb-8 last:pb-0">
+                  <StepperIndicator />
+                  <div className="mt-0.5 space-y-0.5 px-2 text-left">
+                    <StepperTitle>{title}</StepperTitle>
+                    <StepperDescription>{description}</StepperDescription>
+                  </div>
+                </StepperTrigger>
+                {step < stepperSteps.length && (
+                  <StepperSeparator className="absolute inset-y-0 left-3 top-[calc(1.5rem+0.125rem)] -order-1 m-0 -translate-x-1/2 group-data-[orientation=vertical]/stepper:h-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=horizontal]/stepper:w-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=horizontal]/stepper:flex-none" />
+                )}
+              </StepperItem>
+            ))}
+          </Stepper>
         </div>
         {/* Messages area */}
         <div className="flex-1 overflow-y-auto p-3 space-y-4">

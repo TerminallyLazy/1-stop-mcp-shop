@@ -32,7 +32,7 @@
         "mcp/perplexity-ask"
       ],
       "env": {
-        "PERPLEXITY_API_KEY": "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"
+        "PERPLEXITY_API_KEY": "REDACTED"
       }
     },
     "filesystem": {
@@ -50,7 +50,7 @@
         "-y",
         "@supabase/mcp-server-supabase@latest",
         "--access-token",
-        "sbp_47800f466b211026ac951498c2e4a6784a2cc275"
+        "REDACTED"
       ]
     },
     "github": {
@@ -60,7 +60,7 @@
         "@modelcontextprotocol/server-github"
       ],
       "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "REDACTED"
       }
     }
   }

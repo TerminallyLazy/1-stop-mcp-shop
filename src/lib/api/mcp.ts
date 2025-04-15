@@ -522,7 +522,7 @@ function generateServerConfigFile(
  */
 export async function generateMCPTools(
   description: string,
-  model: string = 'gemini-2.5-pro-exp-03-25'
+  model: string = 'gemini-2.0-flash'
 ): Promise<MCPTool[]> {
   console.log('Starting generateMCPTools for description:', description);
 
@@ -782,7 +782,7 @@ Return only valid JSON without explanation, comments, or surrounding text.`;
  */
 export async function generateMCPResources(
   description: string,
-  model: string = 'gemini-2.5-pro-exp-03-25'
+  model: string = 'gemini-2.0-flash'
 ): Promise<MCPResource[]> {
   console.log('Starting generateMCPResources for description:', description);
 
@@ -925,7 +925,7 @@ Only include resources if they would be genuinely useful for the described funct
  */
 export async function generateMCPPrompts(
   description: string,
-  model: string = 'gemini-2.5-pro-exp-03-25'
+  model: string = 'gemini-2.0-flash'
 ): Promise<MCPPrompt[]> {
   console.log('Starting generateMCPPrompts for description:', description);
 
@@ -1569,328 +1569,18 @@ async function searchInformation(query: string, numResults: number = 5): Promise
  * Returns servers in MCP-compatible format
  */
 export async function listMCPServers(): Promise<MCPServer[]> {
-  try {
-    // Get all public servers
-    const { data: serversData, error: serversError } = await supabase
-      .from('mcp_servers')
-      .select('*')
-      .eq('is_public', true)
-      .order('created_at', { ascending: false });
-
-    if (serversError) {
-      console.error(`Supabase error: ${serversError.message}`);
-      throw new Error(`Failed to fetch MCP servers: ${serversError.message}`);
-    }
-
-    // Get tools for all servers
-    const { data: toolsData, error: toolsError } = await supabase
-      .from('mcp_tools')
-      .select('*')
-      .in('server_id', serversData.map((server: { id: any; }) => server.id));
-
-    if (toolsError) {
-      console.error(`Failed to fetch tools: ${toolsError.message}`);
-      throw new Error(`Failed to fetch MCP tools: ${toolsError.message}`);
-    }
-
-    // Get resources for all servers
-    const { data: resourcesData, error: resourcesError } = await supabase
-      .from('mcp_resources')
-      .select('*')
-      .in('server_id', serversData.map((server: { id: any; }) => server.id));
-
-    if (resourcesError) {
-      console.error(`Failed to fetch resources: ${resourcesError.message}`);
-      throw new Error(`Failed to fetch MCP resources: ${resourcesError.message}`);
-    }
-
-    // Get prompts for all servers
-    const { data: promptsData, error: promptsError } = await supabase
-      .from('mcp_prompts')
-      .select('*')
-      .in('server_id', serversData.map((server: { id: any; }) => server.id));
-
-    if (promptsError) {
-      console.error(`Failed to fetch prompts: ${promptsError.message}`);
-      throw new Error(`Failed to fetch MCP prompts: ${promptsError.message}`);
-    }
-
-    // Map the data into the MCPServer format
-    return serversData.map((server: { id: any; name: any; description: any; owner_id: any; created_at: any; updated_at: any; is_public: any; expires_at: any; schema_version: any; transport_types: any; capabilities: any; }) => {
-      const serverTools = toolsData?.filter((tool: { server_id: any; }) => tool.server_id === server.id) || [];
-      const serverResources = resourcesData?.filter((resource: { server_id: any; }) => resource.server_id === server.id) || [];
-      const serverPrompts = promptsData?.filter((prompt: { server_id: any; }) => prompt.server_id === server.id) || [];
-
-      return {
-        id: server.id,
-        name: server.name,
-        description: server.description,
-        ownerId: server.owner_id,
-        createdAt: server.created_at,
-        updatedAt: server.updated_at,
-        isPublic: server.is_public,
-        expiresAt: server.expires_at,
-        schemaVersion: server.schema_version,
-        transportTypes: server.transport_types,
-        capabilities: server.capabilities,
-        tools: serverTools.map((tool: { id: any; name: any; description: any; parameters: any; server_id: any; created_at: any; updated_at: any; }) => ({
-          id: tool.id,
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters,
-          serverId: tool.server_id,
-          createdAt: tool.created_at,
-          updatedAt: tool.updated_at
-        })),
-        resources: serverResources.map((resource: { id: any; name: any; description: any; type: any; content: any; server_id: any; created_at: any; updated_at: any; }) => ({
-          id: resource.id,
-          name: resource.name,
-          description: resource.description,
-          type: resource.type,
-          content: resource.content,
-          serverId: resource.server_id,
-          createdAt: resource.created_at,
-          updatedAt: resource.updated_at
-        })),
-        prompts: serverPrompts.map((prompt: { id: any; name: any; description: any; template: any; server_id: any; created_at: any; updated_at: any; }) => ({
-          id: prompt.id,
-          name: prompt.name,
-          description: prompt.description,
-          template: prompt.template,
-          serverId: prompt.server_id,
-          createdAt: prompt.created_at,
-          updatedAt: prompt.updated_at
-        }))
-      };
-    });
-  } catch (error) {
-    console.error('Error fetching MCP servers:', error);
-    throw error;
-  }
-}
-
-// getMockMCPServers has been removed - all servers must be fetched from the database
-/**
- * Default function for empty server list fallback
- * Returns empty array as we should never use mock servers
- */
-function defaultServers(): MCPServer[] {
-  return [];
-}
-
-/**
- * Generates full MCP server code based on tools and description
- * Creates REAL, PRODUCTION-READY implementation following MCP-SERVER-DEVS.md
- */
-export async function generateMCPServerCode(
-  description: string,
-  tools: MCPTool[],
-  model: string = 'gemini-2.5-pro-exp-03-25'
-): Promise<string> {
-  try {
-    console.log('Generating MCP server code for:', description);
-
-    // Import the templates helper
-    const {
-      generatePythonMCPServerCode,
-      generateUtilsCode,
-      generateDockerfile,
-      generateEnvExample
-    } = await import('./mcp-templates');
-
-    // Generate default code using our templates
-    const defaultCode = generatePythonMCPServerCode(description, tools);
-
-    // Set up a safety timeout to ensure we return something
-    const timeoutPromise = new Promise<string>((resolve) => {
-      setTimeout(() => {
-        console.log('Code generation timeout reached, using default template');
-        resolve(defaultCode);
-      }, 12000);
-    });
-
-    const codeGenPromise = async (): Promise<string> => {
-      try {
-        // Check if we're in a browser environment
-        if (typeof window === 'undefined') {
-          return defaultCode;
-        }
-
-        // Check for API key
-        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-        if (!apiKey) {
-          console.warn('API key not configured, using default template');
-          return defaultCode;
-        }
-
-        // Format the model name
-        const formattedModel = model.includes('/')
-          ? model
-          : model.startsWith('gemini-')
-            ? `models/${model.replace('gemini-', 'gemini/')}`
-            : model;
-
-        // Format the tools as a string for the prompt
-        const toolsString = tools.map(tool => {
-          const paramString = tool.parameters.map(p =>
-            `      ${p.name} (${p.type})${p.required ? ' [required]' : ''}: ${p.description}`
-          ).join('\n');
-
-          return `  - ${tool.name}: ${tool.description}
-    Parameters:
-${paramString}`;
-        }).join('\n\n');
-
-        // Create a prompt based on the Mem0 template
-        const prompt = `Create a complete MCP (Model Context Protocol) server implementation in Python following the Anthropic MCP server specifications. This server will: "${description}"
-
-Use the FastMCP framework for implementing the server, following this structure:
-1. main.py with FastMCP server and tool implementations
-2. utils.py with helper functions for API integrations
-3. Proper error handling with try/except blocks
-4. Support for both SSE and stdio transport
-5. Environment variables for configuration
-
-The server should implement the following tools:
-
-${toolsString}
-
-Base your implementation on this structure from the Mem0 MCP server template:
-
-from mcp.server.fastmcp import FastMCP, Context
-from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
-from dotenv import load_dotenv
-import asyncio
-import json
-import os
-
-# Initialize FastMCP server
-mcp = FastMCP(
-    "server-name",
-    description="Server description",
-    lifespan=server_lifespan,
-    host=os.getenv("HOST", "0.0.0.0"),
-    port=os.getenv("PORT", "8050")
-)
-
-@mcp.tool()
-async def tool_name(ctx: Context, param_name: str) -> str:
-    """Tool description
-
-    Args:
-        ctx: The MCP server context
-        param_name: Parameter description
-    """
-    try:
-        # Implement tool functionality
-        return json.dumps({"status": "success", "data": result})
-    except Exception as e:
-        return json.dumps({"status": "error", "message": str(e)})
-
-async def main():
-    transport = os.getenv("TRANSPORT", "sse")
-    if transport == 'sse':
-        await mcp.run_sse_async()
-    else:
-        await mcp.run_stdio_async()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
-
-For each tool, implement real functionality using appropriate APIs and integrations, not placeholder code.
-Include proper error handling with try/except blocks for all tools.
-Ensure all tools return properly formatted JSON responses.
-
-Return ONLY the Python code without any markdown formatting, explanations, or comments outside the code.`;
-
-        // Call the API via proxy
-        const response = await fetch('/api/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: formattedModel,
-            prompt: prompt,
-            generationConfig: {
-              temperature: 0.3,
-              topP: 0.95,
-              maxOutputTokens: 20000
-            }
-          })
-        });
-
-        if (!response.ok) {
-          console.error('API error:', response.status);
-          return defaultCode;
-        }
-
-        const data = await response.json();
-
-        if (!data.candidates || data.candidates.length === 0 ||
-            !data.candidates[0].content || !data.candidates[0].content.parts ||
-            !data.candidates[0].content.parts[0] || !data.candidates[0].content.parts[0].text) {
-          console.error('Invalid API response format');
-          return defaultCode;
-        }
-
-        const generatedCode = data.candidates[0].content.parts[0].text.trim();
-
-        // Format the code as markdown with multiple files
-        // If it's already in markdown format, return it directly
-        if (generatedCode.includes('```python') || generatedCode.includes('```dockerfile')) {
-          return generatedCode;
-        }
-
-        // Otherwise, format it as markdown with multiple files
-        return `# MCP Server Implementation
-
-## main.py
-\`\`\`python
-${generatedCode}
-\`\`\`
-
-## Dockerfile
-\`\`\`dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "main.py"]
-\`\`\`
-
-## requirements.txt
-\`\`\`
-mcp>=0.1.0
-python-dotenv>=0.19.0
-httpx>=0.24.0
-\`\`\`
-
-## .env.example
-\`\`\`
-TRANSPORT=sse
-PORT=8050
-HOST=0.0.0.0
-\`\`\``;
-      } catch (error) {
-        console.error('Error generating server code:', error);
-        return defaultCode;
-      }
-    };
-
-    // Race the API request against the timeout
-    return await Promise.race([codeGenPromise(), timeoutPromise]);
-  } catch (error) {
-    console.error('Error in generateMCPServerCode:', error);
-    // Fall back to our template-based code generation
-    const { generatePythonMCPServerCode } = await import('./mcp-templates');
-    return generatePythonMCPServerCode(description, tools);
+  // Supabase is disabled for now; return an empty list
+// To re-enable, restore the original code or use a feature flag.
+// See scratchpad.txt for details.
+    try {
+        // Use Supabase queries here when re-enabled
+        return [];
+    } catch (error) {
+        console.error(`Failed to fetch MCP servers: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(`Failed to fetch MCP resources: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    // Supabase and related variables are disabled for now.
+    // To re-enable, restore the original code and data mappings.
+    // For now, simply return an empty array.
+    return [];
   }
 }
